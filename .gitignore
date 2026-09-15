@@ -1,0 +1,34 @@
+# OS / IDE
+.DS_Store
+*.iml
+.idea/
+local.properties
+captures/
+
+# Gradle / Kotlin / native
+.gradle/
+.kotlin/
+build/
+.externalNativeBuild/
+.cxx/
+
+# Xcode / iOS build output
+PhoneXR-iOS/DerivedData*/
+PhoneXR-iOS/xcode-*/
+PhoneXR-iOS/build*/
+PhoneXR-iOS/livecontainer-stage/
+*.ipa
+*.xcuserstate
+
+# Бинарники (выкладываются в GitHub Releases)
+*.apk
+*.idsig
+*.dmg
+VR-Android/
+
+# Большие локальные сборки и исходники сторонних проектов
+Builds/
+openxr-runtime/monado/
+
+# Документация
+*.md

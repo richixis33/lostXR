@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <permission
+        android:name="com.samrat.cardboardhands.permission.START_HAND_TRACKING"
+        android:protectionLevel="signature" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="true" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="com.oculus.intent.category.VR" />
+        </intent>
+        <package android:name="org.godotengine.open_saber" />
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:label="PhoneXR"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.CardboardHands"
+        android:usesCleartextTraffic="true">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".HandTestActivity"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity
+            android:name=".TrackingBootstrapActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:permission="com.samrat.cardboardhands.permission.START_HAND_TRACKING"
+            android:theme="@style/Theme.PhoneXR.Transparent" />
+        <service
+            android:name=".HandTrackingService"
+            android:exported="false"
+            android:process=":hands"
+            android:foregroundServiceType="camera" />
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.patched.apks"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/patched_apk_paths" />
+        </provider>
+    </application>
+</manifest>
