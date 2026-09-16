@@ -3,7 +3,10 @@ package com.samrat.cardboardhands
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.os.Build
@@ -38,6 +41,10 @@ class HandTrackingService : LifecycleService() {
     private val stableLeft = StableHand(.34f)
     private val stableRight = StableHand(.66f)
     private var joyCons: JoyConTracker? = null
+    @Volatile private var settings = Settings.State()
+    private val settingsReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = applySettings()
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -53,6 +60,13 @@ class HandTrackingService : LifecycleService() {
             NOTIFICATION_ID,
             notification,
             if (Build.VERSION.SDK_INT >= 30) ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else 0
+        )
+        applySettings()
+        ContextCompat.registerReceiver(
+            this,
+            settingsReceiver,
+            IntentFilter(Settings.ACTION_APPLY),
+            ContextCompat.RECEIVER_NOT_EXPORTED
         )
         joyCons = JoyConTracker(this)
         transportExecutor.scheduleAtFixedRate({ sendLatest() }, 0L, 16L, TimeUnit.MILLISECONDS)
@@ -158,27 +172,44 @@ class HandTrackingService : LifecycleService() {
         return HandState(true, fist, indexOnly, thumbOnly, palmX, palmY, depth)
     }
 
+    private fun applySettings() {
+        settings = Settings.load(this)
+        JoyConButtons.apply(settings)
+    }
+
     private fun sendLatest() {
         val leftJoy = joyCons?.pose(true) ?: JoyConTracker.Pose()
         val rightJoy = joyCons?.pose(false) ?: JoyConTracker.Pose()
-        val left = stableLeft.snapshot(leftJoy.connected)
-        val right = stableRight.snapshot(rightJoy.connected)
+        var left = stableLeft.snapshot(leftJoy.connected)
+        var right = stableRight.snapshot(rightJoy.connected)
+        val current = settings
+        if (current.handMode == Settings.HandMode.HANDS) {
+            // Plain hand tracking: fingers move the hand, they never press anything.
+            left = left.copy(fist = false, index = false, thumb = false)
+            right = right.copy(fist = false, index = false, thumb = false)
+        }
+        val flags = (if (current.sixDof) 1 else 0) or (if (current.handMode == Settings.HandMode.HANDS) 2 else 0)
         val message = String.format(
             Locale.US,
-            "PH2 %d %d %d %d %.4f %.4f %.4f %.5f %.5f %.5f %.5f " +
-                "%d %d %d %d %.4f %.4f %.4f %.5f %.5f %.5f %.5f",
+            "PH4 %d %d %d %d %.4f %.4f %.4f %.5f %.5f %.5f %.5f %d " +
+                "%d %d %d %d %.4f %.4f %.4f %.5f %.5f %.5f %.5f %d %d",
             left.present.i, left.fist.i, left.index.i, left.thumb.i, left.x, left.y, left.z,
-            leftJoy.x, leftJoy.y, leftJoy.z, leftJoy.w,
+            leftJoy.x, leftJoy.y, leftJoy.z, leftJoy.w, JoyConButtons.mask(true),
             right.present.i, right.fist.i, right.index.i, right.thumb.i, right.x, right.y, right.z,
-            rightJoy.x, rightJoy.y, rightJoy.z, rightJoy.w
+            rightJoy.x, rightJoy.y, rightJoy.z, rightJoy.w, JoyConButtons.mask(false), flags
         )
         val bytes = message.toByteArray(Charsets.US_ASCII)
         // Monado listens on IPv4. Android may resolve getLoopbackAddress() to ::1.
-        try { socket.send(DatagramPacket(bytes, bytes.size, InetAddress.getByName("127.0.0.1"), 42424)) }
-        catch (_: Throwable) { }
+        val loopback = InetAddress.getByName("127.0.0.1")
+        // RUNTIME_PORT feeds Monado, SDK_PORT feeds a game that wants the raw hand and Joy-Con data.
+        for (port in intArrayOf(RUNTIME_PORT, SDK_PORT)) {
+            try { socket.send(DatagramPacket(bytes, bytes.size, loopback, port)) }
+            catch (_: Throwable) { }
+        }
     }
 
     override fun onDestroy() {
+        unregisterReceiver(settingsReceiver)
         tracker?.close()
         joyCons?.close()
         cameraExecutor.shutdownNow()
@@ -261,5 +292,7 @@ class HandTrackingService : LifecycleService() {
     companion object {
         private const val CHANNEL = "phonexr_hands"
         private const val NOTIFICATION_ID = 42
+        private const val RUNTIME_PORT = 42424
+        private const val SDK_PORT = 42425
     }
 }

@@ -10,7 +10,6 @@ import java.io.FileOutputStream
 import java.io.FilterOutputStream
 import java.io.OutputStream
 import java.security.KeyStore
-import java.security.MessageDigest
 import java.security.cert.X509Certificate
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
@@ -18,17 +17,24 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object ApkPatcher {
-    fun patch(context: Context, source: Uri): File {
+    private const val MANIFEST = "AndroidManifest.xml"
+    private const val LOADER = "lib/arm64-v8a/libopenxr_loader.so"
+
+    data class Result(val apk: File, val changes: List<String>)
+
+    fun patch(context: Context, source: Uri): Result {
         val directory = File(context.cacheDir, "patched").apply { mkdirs() }
         val unsigned = File(directory, "unsigned.apk")
         val output = File(directory, "PhoneXR-patched.apk")
         unsigned.delete()
         output.delete()
         val loader = context.assets.open("libopenxr_loader.so").use { it.readBytes() }
-        var replaced = false
+        val changes = mutableListOf<String>()
+        var sawManifest = false
+        var sawArm64 = false
 
         context.contentResolver.openInputStream(source).use { rawInput ->
-            requireNotNull(rawInput) { "Не удалось открыть APK" }
+            requireNotNull(rawInput) { "Не удалось открыть файл" }
             val counting = CountingOutputStream(BufferedOutputStream(FileOutputStream(unsigned)))
             ZipInputStream(BufferedInputStream(rawInput)).use { input ->
                 ZipOutputStream(counting).use { zip ->
@@ -36,17 +42,30 @@ object ApkPatcher {
                         val original = input.nextEntry ?: break
                         val name = original.name
                         if (isOldSignature(name)) continue
-                        val replacement = name == "lib/arm64-v8a/libopenxr_loader.so"
-                        val data = if (replacement || original.method == ZipEntry.STORED) {
-                            if (replacement) loader else input.readBytes()
-                        } else null
+                        if (name.startsWith("lib/arm64-v8a/")) sawArm64 = true
+
+                        val data: ByteArray? = when {
+                            name == MANIFEST -> {
+                                sawManifest = true
+                                val patched = AndroidManifestPatcher.patch(input.readBytes())
+                                changes += patched.changes
+                                patched.bytes
+                            }
+                            name == LOADER -> {
+                                changes += "OpenXR loader заменён на сборку PhoneXR"
+                                loader
+                            }
+                            original.method == ZipEntry.STORED -> input.readBytes()
+                            else -> null
+                        }
+
+                        val stored = data != null && (name.endsWith(".so") || original.method == ZipEntry.STORED)
                         val entry = ZipEntry(name).apply { time = original.time }
-                        if (data != null) {
-                            val crc = CRC32().apply { update(data) }
+                        if (stored) {
                             entry.method = ZipEntry.STORED
-                            entry.size = data.size.toLong()
+                            entry.size = data!!.size.toLong()
                             entry.compressedSize = data.size.toLong()
-                            entry.crc = crc.value
+                            entry.crc = CRC32().apply { update(data) }.value
                             if (name.startsWith("lib/") && name.endsWith(".so")) {
                                 entry.extra = alignmentExtra(counting.count, name, 16_384)
                             }
@@ -54,15 +73,16 @@ object ApkPatcher {
                         zip.putNextEntry(entry)
                         if (data != null) zip.write(data) else input.copyTo(zip)
                         zip.closeEntry()
-                        if (replacement) replaced = true
                     }
                 }
             }
         }
-        require(replaced) { "В APK нет ARM64 OpenXR loader — этот файл пока нельзя патчить" }
+        require(sawManifest) { "Это не APK: внутри нет AndroidManifest.xml" }
+        require(sawArm64) { "В APK нет 64-битных библиотек (arm64-v8a) — такая сборка не запустится" }
         sign(context, unsigned, output)
         unsigned.delete()
-        return output
+        if (changes.isEmpty()) changes += "APK уже подходит, изменена только подпись"
+        return Result(output, changes)
     }
 
     private fun sign(context: Context, input: File, output: File) {

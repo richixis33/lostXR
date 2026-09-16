@@ -10,7 +10,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.view.InputDevice
-import java.util.Locale
 import kotlin.math.sqrt
 
 /** Reads motion sensors exposed by paired Joy-Con through Android's controller API. */
@@ -44,18 +43,8 @@ class JoyConTracker(context: Context) : AutoCloseable, InputManager.InputDeviceL
         slots.forEach { it.detach() }
         for (deviceId in InputDevice.getDeviceIds()) {
             val device = InputDevice.getDevice(deviceId) ?: continue
-            val name = device.name.lowercase(Locale.ROOT)
-            val isNintendoJoyCon = device.vendorId == 0x057e && (device.productId == 0x2006 || device.productId == 0x2007)
-            if (!name.contains("joy-con") && !name.contains("joycon") && !isNintendoJoyCon) continue
-            val side = when {
-                device.productId == 0x2006 -> 0
-                device.productId == 0x2007 -> 1
-                name.contains("(l)") || name.contains("left") -> 0
-                name.contains("(r)") || name.contains("right") -> 1
-                !slots[0].attached -> 0
-                else -> 1
-            }
-            slots[side].attach(device)
+            if (!JoyConButtons.isJoyCon(device)) continue
+            slots[if (JoyConButtons.isLeft(device)) 0 else 1].attach(device)
         }
     }
 
@@ -71,13 +60,16 @@ class JoyConTracker(context: Context) : AutoCloseable, InputManager.InputDeviceL
 
         fun attach(device: InputDevice) {
             if (Build.VERSION.SDK_INT < 31) return
-            manager = device.sensorManager
-            rotation = manager?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
-                ?: manager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-            gyro = manager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+            // Buttons work without motion sensors; some kernels (e.g. Samsung 5.10) expose no Joy-Con IMU.
+            if (!attached) pose = Pose(connected = true)
+            attached = true
+            if (manager != null) return
+            val sensors = device.sensorManager
+            rotation = sensors.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+                ?: sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            gyro = sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
             val sensor = rotation ?: gyro ?: return
-            attached = manager?.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME, handler) == true
-            pose = Pose(connected = attached)
+            if (sensors.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME, handler)) manager = sensors
         }
 
         fun detach() {

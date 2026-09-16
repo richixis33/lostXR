@@ -36,10 +36,10 @@ index 7b647b6..84d0b83 100644
  
  
 diff --git a/src/xrt/drivers/android/android_sensors.c b/src/xrt/drivers/android/android_sensors.c
-index a705d90..7eb8454 100644
+index a705d90..d966bd4 100644
 --- a/src/xrt/drivers/android/android_sensors.c
 +++ b/src/xrt/drivers/android/android_sensors.c
-@@ -14,6 +14,12 @@
+@@ -14,6 +14,13 @@
  
  #include "android_sensors.h"
  
@@ -49,10 +49,11 @@ index a705d90..7eb8454 100644
 +#include <sys/socket.h>
 +#include <unistd.h>
 +
++#include "math/m_api.h"
  #include "util/u_debug.h"
  #include "util/u_device.h"
  #include "util/u_distortion_mesh.h"
-@@ -450,3 +456,295 @@ android_device_create(void)
+@@ -450,3 +457,345 @@ android_device_create(void)
  
  	return d;
  }
@@ -102,6 +103,7 @@ index a705d90..7eb8454 100644
 +	float qy;
 +	float qz;
 +	float qw;
++	uint32_t buttons;
 +	uint64_t transition_ns;
 +	uint64_t transition_duration_ns;
 +	uint64_t received_ns;
@@ -115,6 +117,8 @@ index a705d90..7eb8454 100644
 +
 +static struct phone_hand_state phone_hands[2];
 +static int phone_hand_socket = -1;
++// Bit 0: camera position tracking (6DoF). Bit 1: plain hand tracking, no gesture buttons.
++static uint32_t phone_hand_flags = 1;
 +
 +static void
 +phone_hand_sample_position(const struct phone_hand_state *state, uint64_t now, float *x, float *y, float *z)
@@ -213,9 +217,38 @@ index a705d90..7eb8454 100644
 +	ssize_t length;
 +	while ((length = recv(phone_hand_socket, packet, sizeof(packet) - 1, 0)) > 0) {
 +		packet[length] = '\0';
-+		int lp, lf, li, lt, rp, rf, ri, rt;
++		int lp, lf, li, lt, rp, rf, ri, rt, lb, rb, fl;
 +		float lx, ly, lz, lqx, lqy, lqz, lqw, rx, ry, rz, rqx, rqy, rqz, rqw;
 +		int count = sscanf(packet,
++		                   "PH4 %d %d %d %d %f %f %f %f %f %f %f %d %d %d %d %d %f %f %f %f %f %f %f %d %d",
++		                   &lp, &lf, &li, &lt, &lx, &ly, &lz, &lqx, &lqy, &lqz, &lqw, &lb,
++		                   &rp, &rf, &ri, &rt, &rx, &ry, &rz, &rqx, &rqy, &rqz, &rqw, &rb, &fl);
++		if (count == 25) {
++			uint64_t now = os_monotonic_get_ns();
++			phone_hand_update_state(&phone_hands[0], lp != 0, lf != 0, li != 0, lt != 0, lx, ly, lz,
++			                        lqx, lqy, lqz, lqw, now);
++			phone_hand_update_state(&phone_hands[1], rp != 0, rf != 0, ri != 0, rt != 0, rx, ry, rz,
++			                        rqx, rqy, rqz, rqw, now);
++			phone_hands[0].buttons = (uint32_t)lb;
++			phone_hands[1].buttons = (uint32_t)rb;
++			phone_hand_flags = (uint32_t)fl;
++			continue;
++		}
++		count = sscanf(packet,
++		                   "PH3 %d %d %d %d %f %f %f %f %f %f %f %d %d %d %d %d %f %f %f %f %f %f %f %d",
++		                   &lp, &lf, &li, &lt, &lx, &ly, &lz, &lqx, &lqy, &lqz, &lqw, &lb,
++		                   &rp, &rf, &ri, &rt, &rx, &ry, &rz, &rqx, &rqy, &rqz, &rqw, &rb);
++		if (count == 24) {
++			uint64_t now = os_monotonic_get_ns();
++			phone_hand_update_state(&phone_hands[0], lp != 0, lf != 0, li != 0, lt != 0, lx, ly, lz,
++			                        lqx, lqy, lqz, lqw, now);
++			phone_hand_update_state(&phone_hands[1], rp != 0, rf != 0, ri != 0, rt != 0, rx, ry, rz,
++			                        rqx, rqy, rqz, rqw, now);
++			phone_hands[0].buttons = (uint32_t)lb;
++			phone_hands[1].buttons = (uint32_t)rb;
++			continue;
++		}
++		count = sscanf(packet,
 +		                   "PH2 %d %d %d %d %f %f %f %f %f %f %f %d %d %d %d %f %f %f %f %f %f %f",
 +		                   &lp, &lf, &li, &lt, &lx, &ly, &lz, &lqx, &lqy, &lqz, &lqw,
 +		                   &rp, &rf, &ri, &rt, &rx, &ry, &rz, &rqx, &rqy, &rqz, &rqw);
@@ -266,9 +299,17 @@ index a705d90..7eb8454 100644
 +		xdev->inputs[i].active = active;
 +		xdev->inputs[i].timestamp = now;
 +	}
-+	bool primary = active && state->thumb;
-+	bool secondary = active && state->index;
-+	bool fist = active && state->fist && !both_fists;
++	// Joy-Con bits, see JoyConButtons.kt in PhoneXR.
++	uint32_t pad = active ? state->buttons : 0;
++	uint32_t other_pad = phone_hands[controller->left ? 1 : 0].buttons;
++	bool primary = active && (state->thumb || (pad & 0x1) != 0);
++	bool secondary = active && (state->index || (pad & 0x2) != 0);
++	bool fist = active && ((state->fist && !both_fists) || (pad & 0x4) != 0);
++	bool squeeze = fist || (pad & 0x8) != 0;
++	// The Touch profile has a menu button only on the left controller.
++	xdev->inputs[PH_MENU_CLICK].value.boolean = controller->left && ((pad | other_pad) & 0x10) != 0;
++	xdev->inputs[PH_STICK_CLICK].value.boolean = (pad & 0x20) != 0;
++	xdev->inputs[PH_SYSTEM_CLICK].value.boolean = (pad & 0x40) != 0;
 +	xdev->inputs[PH_X_CLICK].value.boolean = controller->left && primary;
 +	xdev->inputs[PH_X_TOUCH].value.boolean = controller->left && primary;
 +	xdev->inputs[PH_Y_CLICK].value.boolean = controller->left && secondary;
@@ -277,7 +318,7 @@ index a705d90..7eb8454 100644
 +	xdev->inputs[PH_A_TOUCH].value.boolean = !controller->left && primary;
 +	xdev->inputs[PH_B_CLICK].value.boolean = !controller->left && secondary;
 +	xdev->inputs[PH_B_TOUCH].value.boolean = !controller->left && secondary;
-+	xdev->inputs[PH_SQUEEZE].value.vec1.x = fist ? 1.0f : 0.0f;
++	xdev->inputs[PH_SQUEEZE].value.vec1.x = squeeze ? 1.0f : 0.0f;
 +	xdev->inputs[PH_TRIGGER_TOUCH].value.boolean = fist;
 +	xdev->inputs[PH_TRIGGER].value.vec1.x = fist ? 1.0f : 0.0f;
 +	xdev->inputs[PH_STICK_TOUCH].value.boolean = controller->left && both_fists;
@@ -306,10 +347,20 @@ index a705d90..7eb8454 100644
 +	out_relation->pose.orientation.z = state->qz;
 +	out_relation->pose.orientation.w = state->qw == 0.0f ? 1.0f : state->qw;
 +	// Keep the lower part of the camera image inside a comfortable controller range.
-+	float mapped_y = y < 0.08f ? 0.08f : (y > 0.88f ? 0.88f : y);
-+	out_relation->pose.position.x = (x - 0.5f) * 1.15f;
-+	out_relation->pose.position.y = (0.60f - mapped_y) * 0.68f;
-+	out_relation->pose.position.z = -0.35f - z * 0.45f;
++	if ((phone_hand_flags & 1u) != 0) {
++		float mapped_y = y < 0.08f ? 0.08f : (y > 0.88f ? 0.88f : y);
++		out_relation->pose.position.x = (x - 0.5f) * 1.15f;
++		out_relation->pose.position.y = (0.60f - mapped_y) * 0.68f;
++		out_relation->pose.position.z = -0.35f - z * 0.45f;
++	} else {
++		// 3DoF: the hand hangs off a fixed shoulder, pointed wherever the controller points.
++		struct xrt_vec3 forearm = {0.0f, 0.0f, -0.32f};
++		struct xrt_vec3 rotated;
++		math_quat_rotate_vec3(&out_relation->pose.orientation, &forearm, &rotated);
++		out_relation->pose.position.x = (controller->left ? -0.18f : 0.18f) + rotated.x;
++		out_relation->pose.position.y = -0.20f + rotated.y;
++		out_relation->pose.position.z = -0.10f + rotated.z;
++	}
 +	if (state->present && now - state->received_ns < time_s_to_ns(0.35)) {
 +		out_relation->relation_flags = (enum xrt_space_relation_flags)(
 +		    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |

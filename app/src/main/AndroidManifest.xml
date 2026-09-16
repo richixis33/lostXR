@@ -26,6 +26,8 @@
 
     <application
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="PhoneXR"
         android:supportsRtl="true"
         android:theme="@style/Theme.CardboardHands"
@@ -38,6 +40,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+        <activity
+            android:name=".AboutActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
         <activity
             android:name=".HandTestActivity"
             android:exported="false"
@@ -54,6 +64,20 @@
             android:exported="false"
             android:process=":hands"
             android:foregroundServiceType="camera" />
+        <!-- Same process as HandTrackingService so both share JoyConButtons. -->
+        <service
+            android:name=".JoyConInputService"
+            android:exported="false"
+            android:label="@string/joycon_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:process=":hands">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/joycon_input_service" />
+        </service>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.patched.apks"

@@ -60,7 +60,7 @@ class MainActivity : ComponentActivity() {
 
         root.addView(card(
             "Трекинг рук",
-            "Кулак — trigger  •  ☝ — Y/B  •  👍 — X/A\nJoy‑Con: подключите оба в Bluetooth — поворот включится автоматически",
+            "Кулак — курок  •  ☝ — B/Y  •  👍 — A/X. Жесты можно отключить в настройках, оставив чистый трекинг рук.",
             primaryButton("Запустить") { requestStart() }
         ), margins(-1, -2, 0, 0, 0, 16))
 
@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
 
         root.addView(card(
             "Joy‑Con",
-            "Камера отслеживает руки, а гироскопы Joy‑Con — их плавный поворот.",
+            "Кнопки работают через «Специальные возможности» → PhoneXR Joy‑Con. Раскладку можно менять в настройках.",
             secondaryButton("Проверить Joy‑Con") { status.text = joyConStatus() }
         ), margins(-1, -2, 0, 0, 0, 16))
 
@@ -87,6 +87,13 @@ class MainActivity : ComponentActivity() {
             "Выберите Quest/OpenXR APK или универсальный .pxr — PhoneXR возьмёт Android-сборку, подготовит её и откроет установку.",
             patchButton
         ), margins(-1, -2, 0, 0, 0, 16))
+
+        root.addView(secondaryButton("Настройки") {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }, margins(-1, dp(52), 0, 4, 0, 10))
+        root.addView(secondaryButton("О приложении") {
+            startActivity(Intent(this, AboutActivity::class.java))
+        }, margins(-1, dp(52), 0, 0, 0, 10))
 
         root.addView(secondaryButton("Остановить трекинг") {
             stopService(Intent(this, HandTrackingService::class.java))
@@ -181,14 +188,15 @@ class MainActivity : ComponentActivity() {
         Thread {
             try {
                 val payload = PxrPackage.androidPayload(this, uri)
-                val apk = ApkPatcher.patch(this, payload)
+                val patched = ApkPatcher.patch(this, payload)
+                val apk = patched.apk
                 runOnUiThread {
                     patchButton.isEnabled = true
                     if (!packageManager.canRequestPackageInstalls()) {
                         status.text = "Разрешите установку и выберите APK снова"
                         startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
                     } else {
-                        status.text = "APK готов"
+                        status.text = "APK готов: " + patched.changes.joinToString(", ")
                         val content = FileProvider.getUriForFile(this, "$packageName.patched.apks", apk)
                         startActivity(Intent(Intent.ACTION_VIEW).apply {
                             setDataAndType(content, "application/vnd.android.package-archive")
@@ -219,7 +227,8 @@ class MainActivity : ComponentActivity() {
                     sensor.type == Sensor.TYPE_ROTATION_VECTOR
             }
         }
-        return "Joy‑Con: ${devices.size}, с датчиками движения: $withMotion"
+        val buttons = if (JoyConInputService.isEnabled(this)) "кнопки включены" else "кнопки выключены"
+        return "Joy‑Con: ${devices.size}, с гироскопом: $withMotion, $buttons"
     }
 
     private fun card(title: String, description: String, action: MaterialButton): MaterialCardView {

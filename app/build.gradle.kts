@@ -11,8 +11,12 @@ android {
         applicationId = "com.samrat.cardboardhands"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "2.7"
+        versionCode = 11
+        versionName = "1.0.0"
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
@@ -49,4 +53,6 @@ dependencies {
     implementation("com.google.mediapipe:tasks-vision:0.10.35")
     implementation("com.android.tools.build:apksig:8.7.3")
     implementation("com.google.android.material:material:1.12.0")
+
+    testImplementation("junit:junit:4.13.2")
 }

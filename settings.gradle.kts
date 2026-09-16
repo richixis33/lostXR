@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "CardboardHands"
 include(":app")
+include(":sdk")
