@@ -23,7 +23,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      - name: Лицензии Android SDK
+        run: yes | "$ANDROID_HOME"/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null 2>&1 || true
       - name: Сборка APK
         run: ./gradlew :app:assembleDebug --no-daemon
       - name: Имя файла по версии
