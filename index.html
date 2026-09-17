@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhoneXR — загрузки</title>
+<style>
+  :root { --bg:#f2f2f7; --card:#fff; --label:#000; --secondary:#6e6e73; --sep:#e5e5ea; --accent:#ff7a1a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#000; --card:#1c1c1e; --label:#fff; --secondary:#98989d; --sep:#38383a; --accent:#ff9544; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--label);
+         font:17px/1.35 -apple-system, "SF Pro Text", Roboto, "Segoe UI", sans-serif; }
+  main { max-width:640px; margin:0 auto; padding:48px 16px 40px; }
+  h1 { font-size:34px; margin:0 0 4px; }
+  .sub { color:var(--secondary); margin:0 0 28px; font-size:15px; }
+  .head { color:var(--secondary); font-size:13px; text-transform:uppercase; margin:0 16px 6px; }
+  .card { background:var(--card); border-radius:14px; overflow:hidden; margin-bottom:28px; }
+  .row { display:flex; align-items:center; gap:14px; padding:14px 16px; }
+  .row + .row { border-top:1px solid var(--sep); }
+  .icon { width:52px; height:52px; border-radius:12px; object-fit:cover; flex:none; display:grid; place-items:center;
+          font-size:26px; color:#fff; }
+  .daydream { background:linear-gradient(135deg,#9aa0ff,#4b56d2); }
+  .sdk { background:linear-gradient(135deg,#5ac8fa,#0a84ff); }
+  .text { flex:1; min-width:0; }
+  .title { font-weight:600; }
+  .desc { color:var(--secondary); font-size:14px; }
+  .get { flex:none; background:var(--accent); color:#fff; text-decoration:none; font-weight:600;
+         font-size:15px; padding:8px 18px; border-radius:999px; }
+  .get:active { opacity:.7; }
+  .foot { color:var(--secondary); font-size:13px; margin:0 16px 14px; }
+  .foot a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>PhoneXR</h1>
+  <p class="sub">VR на обычном телефоне: OpenXR через Monado, трекинг рук камерой, Joy‑Con вместо контроллеров.
+    Откройте файл после загрузки и нажмите «Установить».</p>
+
+  <div class="head">Приложение</div>
+  <div class="card">
+    <div class="row">
+      <img class="icon" src="icons/phonexr.png" alt="">
+      <div class="text">
+        <div class="title">PhoneXR 1.0.0</div>
+        <div class="desc">VR‑дом, браузер, клавиатура в VR, магазин игр, игры Gear VR · APK · 101 МБ</div>
+      </div>
+      <a class="get" href="https://github.com/samrat1games/phonexr/releases/latest/download/PhoneXR-1.0.0.apk">Скачать</a>
+    </div>
+    <div class="row">
+      <div class="icon daydream">◒</div>
+      <div class="text">
+        <div class="title">Daydream</div>
+        <div class="desc">Играм Daydream нужны Google VR Services. Возьмите Opendream Services 1.13 у проекта Opendream</div>
+      </div>
+      <a class="get" href="https://vlc29.neocities.org/opendream/">Открыть</a>
+    </div>
+  </div>
+
+  <div class="head">Файлы</div>
+  <div class="card">
+    <div class="row">
+      <img class="icon" src="icons/markers.png" alt="">
+      <div class="text">
+        <div class="title">Метки для Joy‑Con</div>
+        <div class="desc">8 меток ArUco для трекинга камерой. Печать A4 в масштабе 100% · PDF</div>
+      </div>
+      <a class="get" href="https://github.com/samrat1games/phonexr/raw/main/markers/joycon_markers_A4.pdf">Скачать</a>
+    </div>
+    <div class="row">
+      <div class="icon sdk">⌗</div>
+      <div class="text">
+        <div class="title">PhoneXR SDK</div>
+        <div class="desc">Для разработчиков: сборка игр под PhoneXR и патч APK · ZIP</div>
+      </div>
+      <a class="get" href="https://github.com/samrat1games/phonexr/releases/latest/download/phonexr-sdk-1.0.0.zip">Скачать</a>
+    </div>
+  </div>
+
+  <p class="foot">Если Android спросит — разрешите браузеру устанавливать приложения.
+    Все версии: <a href="https://github.com/samrat1games/phonexr/releases">релизы на GitHub</a>,
+    исходники: <a href="https://github.com/samrat1games/phonexr">samrat1games/phonexr</a>.</p>
+  <p class="foot">Разработчик <a href="https://t.me/Beketov_samrat">@Beketov_samrat</a> ·
+    тестировщик <a href="https://t.me/livebradar">@livebradar</a> ·
+    дизайнер <a href="https://t.me/Freddytech87">@Freddytech87</a></p>
+</main>
+</body>
+</html>
