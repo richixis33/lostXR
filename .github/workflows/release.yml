@@ -1,0 +1,43 @@
+# Собирает PhoneXR на стороне GitHub и кладёт APK в релиз: так выкладка не зависит
+# от скорости домашнего интернета.
+name: Сборка и релиз
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Тег релиза, например v1.0.0"
+        required: true
+        default: "v1.0.0"
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - name: Сборка APK
+        run: ./gradlew :app:assembleDebug --no-daemon
+      - name: Имя файла по версии
+        id: name
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          NAME="PhoneXR-${TAG#v}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$NAME"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+      - name: В релиз
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ steps.name.outputs.tag }}" >/dev/null 2>&1 \
+            || gh release create "${{ steps.name.outputs.tag }}" --title "PhoneXR ${{ steps.name.outputs.tag }}" --generate-notes
+          gh release upload "${{ steps.name.outputs.tag }}" "${{ steps.name.outputs.name }}" --clobber

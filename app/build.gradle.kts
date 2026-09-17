@@ -34,7 +34,9 @@ android {
     }
 
     // libvrapi.so of the Gear VR adapter, built by gearvr-shim (see gearvr-shim/STATUS.txt).
-    sourceSets.getByName("main").assets.srcDir(rootProject.file("gearvr-shim/build/assets"))
+    // A local build wins; the checked-in copy lets CI (and a fresh clone) package the adapter.
+    val shimBuild = rootProject.file("gearvr-shim/build/assets")
+    sourceSets.getByName("main").assets.srcDir(if (shimBuild.isDirectory) shimBuild else rootProject.file("gearvr-shim/prebuilt"))
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
