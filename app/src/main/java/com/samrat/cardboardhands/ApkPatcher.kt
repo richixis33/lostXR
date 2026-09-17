@@ -3,7 +3,6 @@ package com.samrat.cardboardhands
 import android.content.Context
 import android.net.Uri
 import com.android.apksig.ApkSigner
-import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -13,14 +12,37 @@ import java.security.KeyStore
 import java.security.cert.X509Certificate
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
+import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 object ApkPatcher {
     private const val MANIFEST = "AndroidManifest.xml"
-    private const val LOADER = "lib/arm64-v8a/libopenxr_loader.so"
+    private const val LOADER = "libopenxr_loader.so"
+    private const val VRAPI = "libvrapi.so"
+    /** Oculus store purchase check libraries. Left in place untouched; the user is only warned. */
+    private val ENTITLEMENT = setOf(
+        "libovrplatformloader.so", "libOVRPlatformLoader.so", "libovrplatform.so", "libOVRPlatform.so"
+    )
 
-    data class Result(val apk: File, val changes: List<String>)
+    /**
+     * ABI folders PhoneXR can serve, with the assets that go into them: the OpenXR loader and the
+     * Gear VR adapter (gearvr-shim: VrApi served through OpenXR, so Gear VR games need no Samsung phone).
+     * Old 32-bit games keep their libraries in "armeabi"; a 64-bit phone runs them with the v7a build.
+     */
+    private enum class Abi(val folder: String, val loaderAsset: String, val vrapiAsset: String, val title: String) {
+        ARM64("arm64-v8a", "libopenxr_loader.so", "libvrapi.so", "64 бита"),
+        ARMV7("armeabi-v7a", "libopenxr_loader32.so", "libvrapi32.so", "32 бита"),
+        ARMEABI("armeabi", "libopenxr_loader32.so", "libvrapi32.so", "32 бита");
+
+        companion object {
+            fun of(name: String): Abi? =
+                if (!name.startsWith("lib/")) null
+                else entries.firstOrNull { name.startsWith("lib/${it.folder}/") }
+        }
+    }
+
+    /** [gearVr] is true when the game draws through VrApi and got the PhoneXR adapter. */
+    data class Result(val apk: File, val changes: List<String>, val gearVr: Boolean)
 
     fun patch(context: Context, source: Uri): Result {
         val directory = File(context.cacheDir, "patched").apply { mkdirs() }
@@ -28,61 +50,129 @@ object ApkPatcher {
         val output = File(directory, "PhoneXR-patched.apk")
         unsigned.delete()
         output.delete()
-        val loader = context.assets.open("libopenxr_loader.so").use { it.readBytes() }
+        val assets = HashMap<String, ByteArray?>()
+        fun asset(name: String) = assets.getOrPut(name) {
+            runCatching { context.assets.open(name).use { it.readBytes() } }.getOrNull()
+        }
         val changes = mutableListOf<String>()
         var sawManifest = false
-        var sawArm64 = false
+        var gearVr = false
+        var checksPurchase = false
+        val abis = sortedSetOf<Abi>()
+        val loaderIn = HashSet<Abi>()
+        val vrapiIn = HashSet<Abi>()
+        var otherLibs = false
 
-        context.contentResolver.openInputStream(source).use { rawInput ->
-            requireNotNull(rawInput) { "Не удалось открыть файл" }
+        // The archive is read through its central directory, the way Android's installer reads it.
+        // Walking local headers instead breaks on APKs that carry stray duplicate entries.
+        val copy = File(directory, "source.apk")
+        val input = sourceFile(context, source, copy)
+        try {
             val counting = CountingOutputStream(BufferedOutputStream(FileOutputStream(unsigned)))
-            ZipInputStream(BufferedInputStream(rawInput)).use { input ->
+            ZipFile(input).use { archive ->
                 ZipOutputStream(counting).use { zip ->
-                    while (true) {
-                        val original = input.nextEntry ?: break
+                    val written = HashSet<String>()
+                    for (original in archive.entries()) {
                         val name = original.name
-                        if (isOldSignature(name)) continue
-                        if (name.startsWith("lib/arm64-v8a/")) sawArm64 = true
+                        if (original.isDirectory || isOldSignature(name) || !written.add(name)) continue
+                        val fileName = name.substringAfterLast('/')
+                        val abi = Abi.of(name)
+                        if (abi != null) abis += abi
+                        else if (name.startsWith("lib/") && name.endsWith(".so")) otherLibs = true
+                        if (name.startsWith("lib/") && fileName in ENTITLEMENT && !checksPurchase) {
+                            checksPurchase = true
+                            changes += "в игре есть проверка покупки Oculus ($fileName). PhoneXR её не трогает: " +
+                                "если игра действительно её требует, она не запустится"
+                        }
 
                         val data: ByteArray? = when {
                             name == MANIFEST -> {
                                 sawManifest = true
-                                val patched = AndroidManifestPatcher.patch(input.readBytes())
+                                val patched = AndroidManifestPatcher.patch(archive.getInputStream(original).use { it.readBytes() })
                                 changes += patched.changes
                                 patched.bytes
                             }
-                            name == LOADER -> {
-                                changes += "OpenXR loader заменён на сборку PhoneXR"
-                                loader
+                            abi != null && name == "lib/${abi.folder}/$LOADER" -> {
+                                loaderIn += abi
+                                changes += "OpenXR loader (${abi.title}) заменён на сборку PhoneXR"
+                                requireNotNull(asset(abi.loaderAsset)) { "В PhoneXR нет OpenXR loader для ${abi.title}" }
                             }
-                            original.method == ZipEntry.STORED -> input.readBytes()
+                            abi != null && name == "lib/${abi.folder}/$VRAPI" -> {
+                                vrapiIn += abi
+                                gearVr = true
+                                changes += "libvrapi.so (${abi.title}) заменён переходником Gear VR → OpenXR"
+                                requireNotNull(asset(abi.vrapiAsset)) {
+                                    "Это игра Gear VR (${abi.title}), а в эту сборку PhoneXR не вложен переходник для неё"
+                                }
+                            }
                             else -> null
                         }
 
-                        val stored = data != null && (name.endsWith(".so") || original.method == ZipEntry.STORED)
                         val entry = ZipEntry(name).apply { time = original.time }
-                        if (stored) {
-                            entry.method = ZipEntry.STORED
-                            entry.size = data!!.size.toLong()
-                            entry.compressedSize = data.size.toLong()
-                            entry.crc = CRC32().apply { update(data) }.value
-                            if (name.startsWith("lib/") && name.endsWith(".so")) {
-                                entry.extra = alignmentExtra(counting.count, name, 16_384)
+                        val nativeLib = name.startsWith("lib/") && name.endsWith(".so")
+                        if (data != null) {
+                            if (nativeLib || original.method == ZipEntry.STORED) {
+                                entry.method = ZipEntry.STORED
+                                entry.size = data.size.toLong()
+                                entry.compressedSize = data.size.toLong()
+                                entry.crc = CRC32().apply { update(data) }.value
                             }
+                        } else if (original.method == ZipEntry.STORED) {
+                            // Stored game data can be hundreds of megabytes: copy it as a stream, never into memory.
+                            entry.method = ZipEntry.STORED
+                            entry.size = original.size
+                            entry.compressedSize = original.size
+                            entry.crc = original.crc
+                        }
+                        if (nativeLib && entry.method == ZipEntry.STORED) {
+                            entry.extra = alignmentExtra(counting.count, name, 16_384)
                         }
                         zip.putNextEntry(entry)
-                        if (data != null) zip.write(data) else input.copyTo(zip)
+                        if (data != null) zip.write(data) else archive.getInputStream(original).use { it.copyTo(zip) }
                         zip.closeEntry()
+                    }
+                    // A Gear VR game ships without OpenXR; the adapter loads it from the game's lib folder.
+                    for (abi in vrapiIn - loaderIn) {
+                        val loader = requireNotNull(asset(abi.loaderAsset)) { "В PhoneXR нет OpenXR loader для ${abi.title}" }
+                        val name = "lib/${abi.folder}/$LOADER"
+                        zip.putNextEntry(storedEntry(name, loader, counting.count))
+                        zip.write(loader)
+                        zip.closeEntry()
+                        changes += "добавлен OpenXR loader PhoneXR (${abi.title})"
                     }
                 }
             }
+        } finally {
+            copy.delete()
         }
         require(sawManifest) { "Это не APK: внутри нет AndroidManifest.xml" }
-        require(sawArm64) { "В APK нет 64-битных библиотек (arm64-v8a) — такая сборка не запустится" }
+        require(abis.isNotEmpty() || !otherLibs) {
+            "В APK нет библиотек для ARM (arm64-v8a или armeabi-v7a) — на телефоне такая сборка не запустится"
+        }
+        if (Abi.ARM64 !in abis && abis.isNotEmpty()) changes += "32-битная игра: PhoneXR запустит её в 32-битном режиме"
         sign(context, unsigned, output)
         unsigned.delete()
         if (changes.isEmpty()) changes += "APK уже подходит, изменена только подпись"
-        return Result(output, changes)
+        return Result(output, changes, gearVr)
+    }
+
+    /** A file to open as a zip: installed games already are files, picked documents are copied first. */
+    private fun sourceFile(context: Context, source: Uri, copy: File): File {
+        if (source.scheme == "file") return File(requireNotNull(source.path))
+        copy.delete()
+        context.contentResolver.openInputStream(source).use { raw ->
+            requireNotNull(raw) { "Не удалось открыть файл" }
+            FileOutputStream(copy).use { raw.copyTo(it) }
+        }
+        return copy
+    }
+
+    private fun storedEntry(name: String, data: ByteArray, offset: Long) = ZipEntry(name).apply {
+        method = ZipEntry.STORED
+        size = data.size.toLong()
+        compressedSize = data.size.toLong()
+        crc = CRC32().apply { update(data) }.value
+        extra = alignmentExtra(offset, name, 16_384)
     }
 
     private fun sign(context: Context, input: File, output: File) {

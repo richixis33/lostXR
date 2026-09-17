@@ -5,6 +5,7 @@
 Что делает:
   * правит бинарный AndroidManifest.xml так, чтобы игра видела OpenXR-брокер и ставилась на телефон;
   * подменяет libopenxr_loader.so на сборку PhoneXR (по желанию);
+  * для игр Gear VR подменяет libvrapi.so переходником VrApi -> OpenXR (gearvr-shim);
   * выравнивает и подписывает APK;
   * сообщает, если игра опирается на закрытый рантайм Meta и работать не будет.
 
@@ -21,9 +22,12 @@ import tempfile
 import zipfile
 
 MAX_TARGET_SDK = 29
-LOADER_PATH = "lib/arm64-v8a/libopenxr_loader.so"
-# Библиотеки закрытого рантайма Meta: без сервисов Meta игра с ними не запустится.
-META_ONLY = ("libvrapi.so", "libovrplatformloader.so", "libOVRPlatformLoader.so", "libvrplatform.so")
+# Папки библиотек, которые PhoneXR обслуживает: 64 бита и 32 бита (старые игры кладут их в armeabi).
+ABIS = {"arm64-v8a": "", "armeabi-v7a": "32", "armeabi": "32"}
+# Gear VR и ранние Quest-игры рисуют через VrApi. Его заменяет переходник из gearvr-shim.
+VRAPI = ("libvrapi.so",)
+# Проверка покупки через сервисы Oculus. PhoneXR её не трогает, только предупреждает.
+ENTITLEMENT = ("libovrplatformloader.so", "libOVRPlatformLoader.so", "libovrplatform.so", "libOVRPlatform.so")
 HEADSET_FEATURE_PREFIXES = ("oculus.", "com.oculus.", "android.hardware.vr", "wave.feature", "picovr")
 
 
@@ -138,31 +142,53 @@ def patch_manifest(manifest: bytes):
     return bytes(axml.data), changes
 
 
-def repack(source, destination, loader):
-    changes, meta_libs, has_arm64 = [], set(), False
+def scan(source):
+    """Возвращает имена файлов APK."""
+    with zipfile.ZipFile(source) as original:
+        return original.namelist()
+
+
+def repack(source, destination, loaders, vrapis):
+    """loaders и vrapis: суффикс ("" или "32") -> содержимое библиотеки или None."""
+    changes, meta_libs, abis = [], set(), set()
+    names = set(scan(source))
+    written = set()
     with zipfile.ZipFile(source) as original, zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as output:
         for entry in original.infolist():
             name = entry.filename
             upper = name.upper()
             if upper.startswith("META-INF/") and upper.rsplit(".", 1)[-1] in ("RSA", "DSA", "EC", "SF"):
                 continue
-            if upper == "META-INF/MANIFEST.MF":
+            if upper == "META-INF/MANIFEST.MF" or name in written or name.endswith("/"):
                 continue
-            if name.startswith("lib/arm64-v8a/"):
-                has_arm64 = True
-            if os.path.basename(name) in META_ONLY:
+            written.add(name)
+            abi = name.split("/")[1] if name.startswith("lib/") and name.count("/") >= 2 else None
+            suffix = ABIS.get(abi)
+            if suffix is not None:
+                abis.add(abi)
+            if os.path.basename(name) in VRAPI + ENTITLEMENT:
                 meta_libs.add(os.path.basename(name))
 
             data = original.read(entry)
+            bits = "32 бита" if suffix == "32" else "64 бита"
             if name == "AndroidManifest.xml":
                 data, manifest_changes = patch_manifest(data)
                 changes += manifest_changes
-            elif name == LOADER_PATH and loader:
-                data = loader
-                changes.append("OpenXR loader заменён на сборку PhoneXR")
+            elif suffix is not None and name == f"lib/{abi}/libopenxr_loader.so" and loaders.get(suffix):
+                data = loaders[suffix]
+                changes.append(f"OpenXR loader ({bits}) заменён на сборку PhoneXR")
+            elif suffix is not None and name == f"lib/{abi}/libvrapi.so" and vrapis.get(suffix):
+                data = vrapis[suffix]
+                changes.append(f"libvrapi.so ({bits}) заменён переходником PhoneXR (VrApi -> OpenXR)")
             method = zipfile.ZIP_STORED if name.endswith(".so") else entry.compress_type
             output.writestr(zipfile.ZipInfo(name, date_time=entry.date_time), data, compress_type=method)
-    return changes, meta_libs, has_arm64
+        # Игре Gear VR переходнику нужен OpenXR loader рядом с libvrapi.so.
+        for abi, suffix in ABIS.items():
+            loader_path = f"lib/{abi}/libopenxr_loader.so"
+            if f"lib/{abi}/libvrapi.so" in names and loader_path not in names and loaders.get(suffix) and vrapis.get(suffix):
+                output.writestr(zipfile.ZipInfo(loader_path), loaders[suffix], compress_type=zipfile.ZIP_STORED)
+                changes.append(f"добавлен OpenXR loader PhoneXR ({abi})")
+    return changes, meta_libs, abis
 
 
 def build_tool(name):
@@ -183,32 +209,49 @@ def main():
     parser.add_argument("--keystore-pass", default="android")
     parser.add_argument("--key-alias", default="androiddebugkey")
     parser.add_argument("--loader", help="libopenxr_loader.so для подмены", default=None)
+    parser.add_argument("--vrapi", help="libvrapi.so переходника для игр Gear VR", default=None)
     parser.add_argument("--check", action="store_true", help="только проверить, ничего не записывать")
     arguments = parser.parse_args()
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     project = os.path.dirname(root)
-    loader_path = arguments.loader or os.path.join(project, "app/src/main/assets/libopenxr_loader.so")
-    keystore = arguments.keystore or os.path.join(project, "app/src/main/assets/phonexr-signing.p12")
-    loader = open(loader_path, "rb").read() if os.path.exists(loader_path) else None
+    assets = os.path.join(project, "app/src/main/assets")
+    keystore = arguments.keystore or os.path.join(assets, "phonexr-signing.p12")
+
+    def read(path):
+        return open(path, "rb").read() if path and os.path.exists(path) else None
+
+    loader_path = arguments.loader or os.path.join(assets, "libopenxr_loader.so")
+    vrapi_path = arguments.vrapi or os.path.join(project, "gearvr-shim/build/assets/libvrapi.so")
+    loaders = {"": read(loader_path), "32": read(os.path.join(assets, "libopenxr_loader32.so"))}
+    vrapis = {"": read(vrapi_path), "32": read(os.path.join(project, "gearvr-shim/build/assets/libvrapi32.so"))}
     output = arguments.output or arguments.apk.rsplit(".", 1)[0] + "-phonexr.apk"
 
     with tempfile.TemporaryDirectory() as workspace:
         staged = os.path.join(workspace, "staged.apk")
         aligned = os.path.join(workspace, "aligned.apk")
-        changes, meta_libs, has_arm64 = repack(arguments.apk, staged, loader)
+        changes, meta_libs, abis = repack(arguments.apk, staged, loaders, vrapis)
 
         print("Изменения:")
         for change in changes or ["ничего менять не потребовалось"]:
             print(f"  - {change}")
-        if not has_arm64:
-            print("\nОшибка: в APK нет 64-битных библиотек (arm64-v8a), такая сборка не запустится.")
+        if not abis:
+            print("\nОшибка: в APK нет библиотек для ARM (arm64-v8a или armeabi-v7a), такая сборка не запустится.")
             return 1
-        if meta_libs:
-            print("\nОшибка: игра собрана под закрытый рантайм Meta (" + ", ".join(sorted(meta_libs)) + ").")
-            print("Она проверяет покупку через сервисы Meta и на PhoneXR работать не будет.")
-            print("Подойдут игры на OpenXR: свои сборки, открытые проекты, версии вне магазина Meta.")
-            return 2
+        if "arm64-v8a" not in abis:
+            print("\n32-битная игра: PhoneXR запустит её в 32-битном режиме.")
+        entitlement = sorted(meta_libs.intersection(ENTITLEMENT))
+        if entitlement:
+            print("\nВнимание: в игре есть проверка покупки Oculus (" + ", ".join(entitlement) + ").")
+            print("PhoneXR её не трогает. Если игра действительно её требует, она не запустится.")
+        if meta_libs.intersection(VRAPI):
+            suffix = "" if "arm64-v8a" in abis else "32"
+            if not vrapis[suffix] or not loaders[suffix]:
+                print("\nЭто игра Gear VR (libvrapi.so). Для неё нужен собранный переходник")
+                print("(gearvr-shim/build/assets/libvrapi" + suffix + ".so) и OpenXR loader.")
+                print("Как собрать: gearvr-shim/STATUS.txt")
+                return 3
+            print("\nИгра Gear VR: запускается через переходник VrApi -> OpenXR.")
         if arguments.check:
             print("\nПроверка пройдена, файл не записан (--check).")
             return 0

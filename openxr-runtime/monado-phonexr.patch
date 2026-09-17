@@ -36,7 +36,7 @@ index 7b647b6..84d0b83 100644
  
  
 diff --git a/src/xrt/drivers/android/android_sensors.c b/src/xrt/drivers/android/android_sensors.c
-index a705d90..d966bd4 100644
+index a705d90..b25dd49 100644
 --- a/src/xrt/drivers/android/android_sensors.c
 +++ b/src/xrt/drivers/android/android_sensors.c
 @@ -14,6 +14,13 @@
@@ -53,7 +53,7 @@ index a705d90..d966bd4 100644
  #include "util/u_debug.h"
  #include "util/u_device.h"
  #include "util/u_distortion_mesh.h"
-@@ -450,3 +457,345 @@ android_device_create(void)
+@@ -450,3 +457,374 @@ android_device_create(void)
  
  	return d;
  }
@@ -104,6 +104,8 @@ index a705d90..d966bd4 100644
 +	float qz;
 +	float qw;
 +	uint32_t buttons;
++	float stick_x;
++	float stick_y;
 +	uint64_t transition_ns;
 +	uint64_t transition_duration_ns;
 +	uint64_t received_ns;
@@ -219,7 +221,28 @@ index a705d90..d966bd4 100644
 +		packet[length] = '\0';
 +		int lp, lf, li, lt, rp, rf, ri, rt, lb, rb, fl;
 +		float lx, ly, lz, lqx, lqy, lqz, lqw, rx, ry, rz, rqx, rqy, rqz, rqw;
++		float lsx, lsy, rsx, rsy;
 +		int count = sscanf(packet,
++		                   "PH5 %d %d %d %d %f %f %f %f %f %f %f %d %f %f "
++		                   "%d %d %d %d %f %f %f %f %f %f %f %d %f %f %d",
++		                   &lp, &lf, &li, &lt, &lx, &ly, &lz, &lqx, &lqy, &lqz, &lqw, &lb, &lsx, &lsy,
++		                   &rp, &rf, &ri, &rt, &rx, &ry, &rz, &rqx, &rqy, &rqz, &rqw, &rb, &rsx, &rsy, &fl);
++		if (count == 29) {
++			uint64_t now = os_monotonic_get_ns();
++			phone_hand_update_state(&phone_hands[0], lp != 0, lf != 0, li != 0, lt != 0, lx, ly, lz,
++			                        lqx, lqy, lqz, lqw, now);
++			phone_hand_update_state(&phone_hands[1], rp != 0, rf != 0, ri != 0, rt != 0, rx, ry, rz,
++			                        rqx, rqy, rqz, rqw, now);
++			phone_hands[0].buttons = (uint32_t)lb;
++			phone_hands[1].buttons = (uint32_t)rb;
++			phone_hands[0].stick_x = lsx;
++			phone_hands[0].stick_y = lsy;
++			phone_hands[1].stick_x = rsx;
++			phone_hands[1].stick_y = rsy;
++			phone_hand_flags = (uint32_t)fl;
++			continue;
++		}
++		count = sscanf(packet,
 +		                   "PH4 %d %d %d %d %f %f %f %f %f %f %f %d %d %d %d %d %f %f %f %f %f %f %f %d %d",
 +		                   &lp, &lf, &li, &lt, &lx, &ly, &lz, &lqx, &lqy, &lqz, &lqw, &lb,
 +		                   &rp, &rf, &ri, &rt, &rx, &ry, &rz, &rqx, &rqy, &rqz, &rqw, &rb, &fl);
@@ -321,9 +344,15 @@ index a705d90..d966bd4 100644
 +	xdev->inputs[PH_SQUEEZE].value.vec1.x = squeeze ? 1.0f : 0.0f;
 +	xdev->inputs[PH_TRIGGER_TOUCH].value.boolean = fist;
 +	xdev->inputs[PH_TRIGGER].value.vec1.x = fist ? 1.0f : 0.0f;
-+	xdev->inputs[PH_STICK_TOUCH].value.boolean = controller->left && both_fists;
-+	xdev->inputs[PH_STICK].value.vec2.x = 0.0f;
-+	xdev->inputs[PH_STICK].value.vec2.y = controller->left && both_fists ? 1.0f : 0.0f;
++	// The Joy-Con stick walks; both fists stay as a fallback for a phone without a controller.
++	float stick_x = active ? state->stick_x : 0.0f;
++	float stick_y = active ? state->stick_y : 0.0f;
++	if (stick_x == 0.0f && stick_y == 0.0f && controller->left && both_fists) {
++		stick_y = 1.0f;
++	}
++	xdev->inputs[PH_STICK_TOUCH].value.boolean = stick_x != 0.0f || stick_y != 0.0f;
++	xdev->inputs[PH_STICK].value.vec2.x = stick_x;
++	xdev->inputs[PH_STICK].value.vec2.y = stick_y;
 +	return XRT_SUCCESS;
 +}
 +
@@ -426,3 +455,19 @@ index 97df566..9294d13 100644
          }
      }
      hilt {
+diff --git a/src/xrt/targets/openxr_android/src/main/AndroidManifest.xml b/src/xrt/targets/openxr_android/src/main/AndroidManifest.xml
+index 59d97ed..694a5ac 100644
+--- a/src/xrt/targets/openxr_android/src/main/AndroidManifest.xml
++++ b/src/xrt/targets/openxr_android/src/main/AndroidManifest.xml
+@@ -44,9 +44,11 @@
+ 
+     <uses-permission android:name="android.permission.INTERNET" />
+ 
++    <!-- multiArch installs the 32-bit runtime next to the 64-bit one, so 32-bit games find it too. -->
+     <application
+         android:name="org.freedesktop.monado.openxr_runtime.MonadoOpenXrApplication"
+         android:allowBackup="true"
++        android:multiArch="true"
+         android:icon="@mipmap/ic_launcher"
+         android:roundIcon="@mipmap/ic_launcher_round"
+         android:label="@string/app_name"

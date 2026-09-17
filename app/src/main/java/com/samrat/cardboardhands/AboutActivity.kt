@@ -3,67 +3,103 @@ package com.samrat.cardboardhands
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.method.LinkMovementMethod
-import android.text.style.ClickableSpan
-import android.view.Gravity
-import android.view.View
-import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.TextView
 import androidx.activity.ComponentActivity
-import com.google.android.material.color.DynamicColors
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import zone.ien.hig.CupertinoText
+import zone.ien.hig.section.SectionScope
+import zone.ien.hig.theme.CupertinoTheme
 
 class AboutActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        DynamicColors.applyToActivityIfAvailable(this)
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(28), dp(56), dp(28), dp(28))
-        }
+        setContent { PhoneXRTheme { About() } }
+    }
 
-        root.addView(ImageView(this).apply {
-            setImageResource(R.mipmap.ic_launcher)
-            contentDescription = "PhoneXR"
-        }, LinearLayout.LayoutParams(dp(128), dp(128)).apply { bottomMargin = dp(20) })
-
-        root.addView(TextView(this).apply {
-            text = "PhoneXR"
-            textSize = 34f
-        })
-        root.addView(TextView(this).apply {
-            text = "Версия ${BuildConfig.VERSION_NAME}"
-            textSize = 16f
-            alpha = .75f
-        }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(26) })
-
-        val credit = "Made with ❤️ by @Beketov_Samrat"
-        val handle = credit.indexOf("@Beketov_Samrat")
-        root.addView(TextView(this).apply {
-            textSize = 17f
-            movementMethod = LinkMovementMethod.getInstance()
-            text = SpannableString(credit).apply {
-                setSpan(object : ClickableSpan() {
-                    override fun onClick(widget: View) = openTelegram()
-                }, handle, credit.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    @Composable
+    private fun About() {
+        HigPage(title = "О приложении", onBack = ::finish) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 28.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                AppIcon()
+                CupertinoText("PhoneXR", style = CupertinoTheme.typography.title1)
+                CupertinoText(
+                    "Версия ${BuildConfig.VERSION_NAME}",
+                    color = CupertinoTheme.colorScheme.secondaryLabel
+                )
+                CupertinoText(
+                    "VR на обычном телефоне: OpenXR через Monado, трекинг рук камерой, Joy‑Con вместо контроллеров " +
+                        "и переходник для игр Gear VR.",
+                    style = CupertinoTheme.typography.subhead,
+                    textAlign = TextAlign.Center,
+                    color = CupertinoTheme.colorScheme.secondaryLabel
+                )
             }
-        }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(28) })
-
-        root.addView(TextView(this).apply {
-            text = "VR на обычном телефоне: OpenXR через Monado, трекинг рук камерой и Joy‑Con вместо контроллеров."
-            textSize = 14f
-            gravity = Gravity.CENTER
-            alpha = .75f
-        })
-        setContentView(root)
+            HigSection(
+                title = "Благодарности",
+                footer = "Комната кинотеатра: «minecraft vr Living Room» от Piethekiddev (Sketchfab), лицензия CC BY 4.0."
+            ) {
+                HigLink("Модель комнаты на Sketchfab") {
+                    startActivity(
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://sketchfab.com/3d-models/minecraft-vr-living-room-decef3993905402b8237708ae5af0704")
+                        )
+                    )
+                }
+            }
+            HigSection(title = "Команда", footer = "Made with ❤️") {
+                Person("Разработчик", "@Beketov_samrat")
+                Person("Тестировщик", "@livebradar")
+                Person("Дизайнер", "@Freddytech87")
+            }
+        }
     }
 
-    private fun openTelegram() {
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/Beketov_Samrat")))
+    /** A person from the team: the role and their Telegram, which opens on a tap. */
+    @Composable
+    private fun SectionScope.Person(role: String, telegram: String) {
+        HigLink(role, value = telegram) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/${telegram.removePrefix("@")}")))
+        }
     }
 
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+    /**
+     * The launcher icon is an adaptive icon (XML), which Compose painterResource cannot load —
+     * that threw as soon as this screen opened. The system Drawable draws it on any Android version.
+     */
+    @Composable
+    private fun AppIcon() {
+        val icon = remember { packageManager.getApplicationIcon(packageName) }
+        Canvas(
+            modifier = Modifier
+                .size(112.dp)
+                .clip(RoundedCornerShape(26.dp))
+        ) {
+            drawIntoCanvas { canvas ->
+                icon.setBounds(0, 0, size.width.toInt(), size.height.toInt())
+                icon.draw(canvas.nativeCanvas)
+            }
+        }
+    }
 }

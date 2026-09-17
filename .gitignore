@@ -32,3 +32,13 @@ openxr-runtime/monado/
 
 # Документация
 *.md
+
+# Сборка переходника Gear VR
+gearvr-shim/build/
+
+# Oculus Mobile SDK (VrApi) — только локально, не выкладывать
+gearvr-shim/third_party/
+
+gearvr-shim/build32/
+app/src/main/assets/daydream/
+__pycache__/

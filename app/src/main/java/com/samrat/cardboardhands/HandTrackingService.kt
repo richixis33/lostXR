@@ -40,7 +40,15 @@ class HandTrackingService : LifecycleService() {
     private val socket = DatagramSocket()
     private val stableLeft = StableHand(.34f)
     private val stableRight = StableHand(.66f)
+    private val pinchLatches = arrayOf(HandGestures.PinchLatch(), HandGestures.PinchLatch())
     private var joyCons: JoyConTracker? = null
+    private val vision = JoyConVision()
+    private val markers by lazy { JoyConMarkers() }
+    @Volatile private var markerPoses = arrayOf(JoyConMarkers.Pose(), JoyConMarkers.Pose())
+    private val markerSeenAtMs = LongArray(2)
+    /** Latest Joy-Con seen by the camera and when, per side. */
+    @Volatile private var seen = arrayOf(JoyConVision.Detection(), JoyConVision.Detection())
+    private val seenAtMs = LongArray(2)
     @Volatile private var settings = Settings.State()
     private val settingsReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) = applySettings()
@@ -95,20 +103,29 @@ class HandTrackingService : LifecycleService() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = future.get()
+            // Markers are small in the image; they need a sharper frame than hands.
+            // A sharper frame gives steadier landmarks; markers need it anyway.
+            val size = android.util.Size(640, 480)
             val analysis = ImageAnalysis.Builder()
-                .setTargetResolution(android.util.Size(320, 240))
+                .setTargetResolution(size)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
             analysis.setAnalyzer(cameraExecutor) { image ->
                 try {
                     val timestamp = image.imageInfo.timestamp / 1_000_000L
-                    if (timestamp - lastFrameMs >= 45 && busy.compareAndSet(false, true)) {
+                    // Colour search is cheap, so the camera Joy-Con mode uses every frame it can.
+                    val interval = if (settings.cameraJoyCons || settings.markerJoyCons) 25 else 30
+                    if (timestamp - lastFrameMs >= interval && busy.compareAndSet(false, true)) {
                         lastFrameMs = timestamp
                         val frame = image.toBitmap()
                         val rotation = image.imageInfo.rotationDegrees
                         trackingExecutor.execute {
-                            try { tracker?.detect(frame, timestamp, rotation) }
-                            finally { frame.recycle(); busy.set(false) }
+                            try {
+                                if (settings.markerJoyCons) findMarkers(frame.rotate(rotation))
+                                else if (settings.cameraJoyCons) findJoyCons(frame.rotate(rotation))
+                                else tracker?.detect(frame, timestamp, rotation)
+                            }
+                            finally { if (!frame.isRecycled) frame.recycle(); busy.set(false) }
                         }
                     }
                 } catch (_: Throwable) {
@@ -122,6 +139,54 @@ class HandTrackingService : LifecycleService() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private fun findMarkers(frame: Bitmap) {
+        val (left, right) = markers.process(frame)
+        if (!frame.isRecycled) frame.recycle()
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (left.found) markerSeenAtMs[0] = now
+        if (right.found) markerSeenAtMs[1] = now
+        markerPoses = arrayOf(if (left.found) left else markerPoses[0], if (right.found) right else markerPoses[1])
+    }
+
+    private fun markerHand(slot: Int, connected: Boolean): HandState {
+        val pose = markerPoses[slot]
+        val visible = pose.found && android.os.SystemClock.elapsedRealtime() - markerSeenAtMs[slot] < LOST_MS
+        // Monado places the hand at 0.35 + z * 0.45 m in front of the eyes.
+        val depth = ((pose.distance - 0.35f) / 0.45f).coerceIn(0f, 1f)
+        val x = if (pose.found) pose.x else if (slot == 0) .34f else .66f
+        return HandState(visible || connected, x = x, y = pose.y, z = depth)
+    }
+
+    private fun findJoyCons(frame: Bitmap) {
+        val current = settings
+        val (left, right) = vision.process(frame, current.leftColor, current.rightColor)
+        if (!frame.isRecycled) frame.recycle()
+        val now = android.os.SystemClock.elapsedRealtime()
+        listOf(left, right).forEachIndexed { slot, detection ->
+            if (detection.found) {
+                seenAtMs[slot] = now
+            } else if (now - seenAtMs[slot] > LOST_MS) {
+                vision.reset(slot)
+            }
+        }
+        seen = arrayOf(
+            if (left.found) left else seen[0],
+            if (right.found) right else seen[1]
+        )
+    }
+
+    /** Camera Joy-Con state in the hand message: position from the blob, no finger gestures. */
+    private fun cameraHand(slot: Int, connected: Boolean): HandState {
+        val detection = seen[slot]
+        val visible = detection.found && android.os.SystemClock.elapsedRealtime() - seenAtMs[slot] < LOST_MS
+        // Joy-Con is about 36 mm thick: 0.08 of the image width is close to the camera, 0.02 is an arm away.
+        val depth = ((0.08f - detection.thickness) / 0.06f).coerceIn(0f, 1f)
+        // A connected Joy-Con out of view stays where it was last seen instead of vanishing.
+        // Never seen yet: rest to the side the Joy-Con belongs to.
+        val x = if (detection.found) detection.x else if (slot == 0) .34f else .66f
+        return HandState(visible || connected, x = x, y = detection.y, z = depth)
+    }
+
     private fun onHands(result: HandLandmarkerResult) {
         var left = HandState()
         var right = HandState()
@@ -130,7 +195,11 @@ class HandTrackingService : LifecycleService() {
             val reported = result.handednesses().getOrNull(index)?.firstOrNull()?.categoryName().orEmpty()
             // MediaPipe handedness assumes a mirrored selfie image; the back camera is not mirrored.
             val physicalLeft = reported.equals("Right", true)
-            val state = classify(points)
+            val state = classify(points).let { hand ->
+                val gesture = HandGestures.shape(points, physicalLeft)
+                val pinch = pinchLatches[if (physicalLeft) 0 else 1].update(gesture)
+                hand.copy(pinch = pinch, palmToFace = gesture.palmToFace)
+            }
             if (physicalLeft) left = state else right = state
         }
         stableLeft.update(left)
@@ -178,25 +247,57 @@ class HandTrackingService : LifecycleService() {
     }
 
     private fun sendLatest() {
-        val leftJoy = joyCons?.pose(true) ?: JoyConTracker.Pose()
-        val rightJoy = joyCons?.pose(false) ?: JoyConTracker.Pose()
+        val current = settings
+        var leftJoy = joyCons?.pose(true) ?: JoyConTracker.Pose()
+        var rightJoy = joyCons?.pose(false) ?: JoyConTracker.Pose()
         var left = stableLeft.snapshot(leftJoy.connected)
         var right = stableRight.snapshot(rightJoy.connected)
-        val current = settings
-        if (current.handMode == Settings.HandMode.HANDS) {
+        if (current.markerJoyCons) {
+            left = markerHand(0, leftJoy.connected)
+            right = markerHand(1, rightJoy.connected)
+            markerPoses[0].let { leftJoy = JoyConTracker.Pose(leftJoy.connected, it.qx, it.qy, it.qz, it.qw) }
+            markerPoses[1].let { rightJoy = JoyConTracker.Pose(rightJoy.connected, it.qx, it.qy, it.qz, it.qw) }
+        } else if (current.cameraJoyCons) {
+            left = cameraHand(0, leftJoy.connected)
+            right = cameraHand(1, rightJoy.connected)
+            // A working Joy-Con gyroscope stays the better source of rotation; otherwise the camera gives it.
+            leftJoy = cameraRotation(0, leftJoy, gyroWorks(true))
+            rightJoy = cameraRotation(1, rightJoy, gyroWorks(false))
+        } else if (current.handMode == Settings.HandMode.HANDS) {
             // Plain hand tracking: fingers move the hand, they never press anything.
             left = left.copy(fist = false, index = false, thumb = false)
             right = right.copy(fist = false, index = false, thumb = false)
         }
+        // Quest-style gestures for games: a pinch clicks (the runtime's trigger comes from the fist field),
+        // a real fist grabs (squeeze). With a Joy-Con in hand its buttons do this instead.
+        var leftMask = JoyConButtons.mask(true)
+        var rightMask = JoyConButtons.mask(false)
+        if (current.handMode == Settings.HandMode.CONTROLLERS && !current.markerJoyCons && !current.cameraJoyCons) {
+            if (!leftJoy.connected) {
+                if (left.fist) leftMask = leftMask or JoyConButtons.SQUEEZE
+                left = left.copy(fist = left.pinch)
+            }
+            if (!rightJoy.connected) {
+                if (right.fist) rightMask = rightMask or JoyConButtons.SQUEEZE
+                right = right.copy(fist = right.pinch)
+            }
+        }
         val flags = (if (current.sixDof) 1 else 0) or (if (current.handMode == Settings.HandMode.HANDS) 2 else 0)
+        val leftStick = JoyConButtons.stick(left = true)
+        val rightStick = JoyConButtons.stick(left = false)
         val message = String.format(
             Locale.US,
-            "PH4 %d %d %d %d %.4f %.4f %.4f %.5f %.5f %.5f %.5f %d " +
-                "%d %d %d %d %.4f %.4f %.4f %.5f %.5f %.5f %.5f %d %d",
+            "PH5 %d %d %d %d %.4f %.4f %.4f %.5f %.5f %.5f %.5f %d %.3f %.3f " +
+                "%d %d %d %d %.4f %.4f %.4f %.5f %.5f %.5f %.5f %d %.3f %.3f %d " +
+                // Appended after the runtime's fields (it ignores them): pinch and palm-to-face per hand.
+                "%d %d %d %d",
             left.present.i, left.fist.i, left.index.i, left.thumb.i, left.x, left.y, left.z,
-            leftJoy.x, leftJoy.y, leftJoy.z, leftJoy.w, JoyConButtons.mask(true),
+            leftJoy.x, leftJoy.y, leftJoy.z, leftJoy.w, leftMask,
+            leftStick[0], leftStick[1],
             right.present.i, right.fist.i, right.index.i, right.thumb.i, right.x, right.y, right.z,
-            rightJoy.x, rightJoy.y, rightJoy.z, rightJoy.w, JoyConButtons.mask(false), flags
+            rightJoy.x, rightJoy.y, rightJoy.z, rightJoy.w, rightMask,
+            rightStick[0], rightStick[1], flags,
+            left.pinch.i, left.palmToFace.i, right.pinch.i, right.palmToFace.i
         )
         val bytes = message.toByteArray(Charsets.US_ASCII)
         // Monado listens on IPv4. Android may resolve getLoopbackAddress() to ::1.
@@ -206,6 +307,14 @@ class HandTrackingService : LifecycleService() {
             try { socket.send(DatagramPacket(bytes, bytes.size, loopback, port)) }
             catch (_: Throwable) { }
         }
+    }
+
+    private fun gyroWorks(left: Boolean) = (joyCons?.motion(left)?.rateHz ?: 0f) >= 1f
+
+    private fun cameraRotation(slot: Int, gyro: JoyConTracker.Pose, useGyro: Boolean): JoyConTracker.Pose {
+        if (useGyro) return gyro
+        val q = seen[slot].quaternion()
+        return JoyConTracker.Pose(gyro.connected, q[0], q[1], q[2], q[3])
     }
 
     override fun onDestroy() {
@@ -235,6 +344,8 @@ class HandTrackingService : LifecycleService() {
         val x: Float = .5f,
         val y: Float = .5f,
         val z: Float = .5f,
+        val pinch: Boolean = false,
+        val palmToFace: Boolean = false,
     )
 
     /** Removes landmark jitter and keeps a detected click alive long enough for games to read it. */
@@ -242,6 +353,12 @@ class HandTrackingService : LifecycleService() {
         private var x = restingX
         private var y = .5f
         private var z = .5f
+        // One Euro filters: calm while the hand holds still, responsive when it moves.
+        private val fx = HandGestures.OneEuro(minCutoff = 1.0f, beta = 1.5f)
+        private val fy = HandGestures.OneEuro(minCutoff = 1.0f, beta = 1.5f)
+        private val fz = HandGestures.OneEuro(minCutoff = .5f, beta = .8f)
+        private var pinchUntilMs = 0L
+        private var palmToFace = false
         private var lastSeenMs = 0L
         private var fistUntilMs = 0L
         private var indexUntilMs = 0L
@@ -252,12 +369,14 @@ class HandTrackingService : LifecycleService() {
             val now = android.os.SystemClock.elapsedRealtime()
             if (raw.present) {
                 val first = lastSeenMs == 0L || now - lastSeenMs > 300L
-                val positionWeight = if (first) 1f else .72f
-                val depthWeight = if (first) 1f else .46f
-                x += (raw.x - x) * positionWeight
-                y += (raw.y - y) * positionWeight
-                z += (raw.z - z) * depthWeight
+                if (first) { fx.reset(); fy.reset(); fz.reset() }
+                val ns = now * 1_000_000L
+                x = fx.filter(raw.x, ns)
+                y = fy.filter(raw.y, ns)
+                z = fz.filter(raw.z, ns)
                 lastSeenMs = now
+                if (raw.pinch) pinchUntilMs = now + 90L
+                palmToFace = raw.palmToFace
                 if (raw.fist) {
                     fistUntilMs = now + 110L
                     indexUntilMs = 0L
@@ -282,7 +401,9 @@ class HandTrackingService : LifecycleService() {
                 thumb = handPresent && now < thumbUntilMs,
                 x = x,
                 y = y,
-                z = z
+                z = z,
+                pinch = handPresent && now < pinchUntilMs,
+                palmToFace = handPresent && palmToFace
             )
         }
     }
@@ -294,5 +415,7 @@ class HandTrackingService : LifecycleService() {
         private const val NOTIFICATION_ID = 42
         private const val RUNTIME_PORT = 42424
         private const val SDK_PORT = 42425
+        /** A Joy-Con not seen for this long no longer counts as tracked. */
+        private const val LOST_MS = 400L
     }
 }

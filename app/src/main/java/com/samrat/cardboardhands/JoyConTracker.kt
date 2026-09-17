@@ -22,6 +22,17 @@ class JoyConTracker(context: Context) : AutoCloseable, InputManager.InputDeviceL
         val w: Float = 1f
     )
 
+    /** What the gyro check shows: which motion sensors Android gave and whether data really flows. */
+    data class Motion(
+        val connected: Boolean = false,
+        val sensors: List<String> = emptyList(),
+        /** Events per second over the last second; 0 when nothing arrives. */
+        val rateHz: Float = 0f,
+        /** Rotation speed from the gyroscope, degrees per second. */
+        val degreesPerSecond: Float = 0f,
+        val events: Long = 0
+    )
+
     private val inputManager = context.getSystemService(InputManager::class.java)
     private val thread = HandlerThread("PhoneXR Joy-Con").apply { start() }
     private val handler = Handler(thread.looper)
@@ -33,6 +44,14 @@ class JoyConTracker(context: Context) : AutoCloseable, InputManager.InputDeviceL
     }
 
     fun pose(left: Boolean): Pose = slots[if (left) 0 else 1].snapshot()
+
+    /** True when this Joy-Con is paired and Android exposes a gyroscope for it. */
+    fun hasMotion(left: Boolean): Boolean = slots[if (left) 0 else 1].hasMotion
+
+    fun motion(left: Boolean): Motion = slots[if (left) 0 else 1].motion()
+
+    /** Makes the current Joy-Con orientation the new "straight ahead". */
+    fun recenter() = handler.post { slots.forEach { it.recenter() } }
 
     override fun onInputDeviceAdded(deviceId: Int) = refresh()
     override fun onInputDeviceRemoved(deviceId: Int) = refresh()
@@ -57,6 +76,11 @@ class JoyConTracker(context: Context) : AutoCloseable, InputManager.InputDeviceL
         private var gyro: Sensor? = null
         private var lastGyroNs = 0L
         private var reference: FloatArray? = null
+        private var sensorNames = emptyList<String>()
+        @Volatile private var events = 0L
+        @Volatile private var degreesPerSecond = 0f
+        /** Event timestamps (ms, uptime) of the last second, for the rate. */
+        private val recent = ArrayDeque<Long>()
 
         fun attach(device: InputDevice) {
             if (Build.VERSION.SDK_INT < 31) return
@@ -68,8 +92,11 @@ class JoyConTracker(context: Context) : AutoCloseable, InputManager.InputDeviceL
             rotation = sensors.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
                 ?: sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
             gyro = sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+            sensorNames = sensors.getSensorList(Sensor.TYPE_ALL).map { sensorName(it) }.distinct()
             val sensor = rotation ?: gyro ?: return
             if (sensors.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME, handler)) manager = sensors
+            // The gyroscope also feeds the rotation speed when orientation comes from a rotation vector.
+            if (rotation != null) gyro?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME, handler) }
         }
 
         fun detach() {
@@ -81,13 +108,42 @@ class JoyConTracker(context: Context) : AutoCloseable, InputManager.InputDeviceL
             lastGyroNs = 0L
             reference = null
             pose = Pose()
+            sensorNames = emptyList()
+            events = 0
+            degreesPerSecond = 0f
+            synchronized(recent) { recent.clear() }
+        }
+
+        fun motion(): Motion {
+            val now = android.os.SystemClock.uptimeMillis()
+            val rate = synchronized(recent) {
+                while (recent.isNotEmpty() && now - recent.first() > 1000) recent.removeFirst()
+                recent.size.toFloat()
+            }
+            return Motion(attached, sensorNames, rate, if (rate > 0) degreesPerSecond else 0f, events)
         }
 
         fun snapshot() = pose
 
+        val hasMotion: Boolean get() = manager != null
+
+        fun recenter() {
+            reference = null
+            lastGyroNs = 0L
+            if (attached) pose = Pose(connected = true)
+        }
+
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
         override fun onSensorChanged(event: SensorEvent) {
+            events++
+            synchronized(recent) { recent.addLast(android.os.SystemClock.uptimeMillis()) }
+            if (event.sensor.type == Sensor.TYPE_GYROSCOPE) {
+                val (x, y, z) = Triple(event.values[0], event.values[1], event.values[2])
+                degreesPerSecond = Math.toDegrees(sqrt(x * x + y * y + z * z).toDouble()).toFloat()
+                // With a rotation vector the orientation comes from it, the gyroscope only reports speed.
+                if (rotation != null) return
+            }
             if (event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR || event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
                 val raw = FloatArray(4)
                 SensorManager.getQuaternionFromVector(raw, event.values)
@@ -116,6 +172,13 @@ class JoyConTracker(context: Context) : AutoCloseable, InputManager.InputDeviceL
             val length = sqrt(x * x + y * y + z * z + w * w).coerceAtLeast(.0001f)
             return floatArrayOf(x / length, y / length, z / length, w / length)
         }
+    }
+
+    private fun sensorName(sensor: Sensor) = when (sensor.type) {
+        Sensor.TYPE_GYROSCOPE -> "гироскоп"
+        Sensor.TYPE_ACCELEROMETER -> "акселерометр"
+        Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_ROTATION_VECTOR -> "ориентация"
+        else -> sensor.stringType.substringAfterLast('.')
     }
 
     override fun close() {

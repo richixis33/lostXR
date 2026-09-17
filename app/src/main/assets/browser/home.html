@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Браузер PhoneXR</title>
+<style>
+  body { margin: 0; min-height: 100vh; background: linear-gradient(160deg, #1c1c24, #2c2a3a); color: #fff;
+         font: 28px -apple-system, Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; }
+  h1 { font-size: 64px; margin: 70px 0 10px; }
+  p { color: #b9b9c6; margin: 0 0 50px; }
+  form { width: 70%; margin-bottom: 50px; }
+  input { width: 100%; box-sizing: border-box; font-size: 32px; padding: 22px 32px; border-radius: 40px;
+          border: none; background: rgba(255,255,255,.12); color: #fff; }
+  .grid { display: grid; grid-template-columns: repeat(4, 220px); gap: 36px; }
+  a { color: #fff; text-decoration: none; text-align: center; }
+  .tile { width: 150px; height: 150px; margin: 0 auto 14px; border-radius: 50%; display: grid; place-items: center;
+          font-size: 64px; font-weight: 700; }
+</style>
+</head>
+<body>
+  <h1>Браузер</h1>
+  <p>Щипок — нажать, щипок и движение — прокрутка</p>
+  <form action="https://www.google.com/search"><input name="q" placeholder="Поиск или адрес"></form>
+  <div class="grid">
+    <a href="https://www.google.com"><div class="tile" style="background:#4285f4">G</div>Google</a>
+    <a href="https://m.youtube.com"><div class="tile" style="background:#ff0033">▶</div>YouTube</a>
+    <a href="https://ru.wikipedia.org"><div class="tile" style="background:#636466">W</div>Википедия</a>
+    <a href="https://ya.ru"><div class="tile" style="background:#fc3f1d">Я</div>Яндекс</a>
+    <a href="https://www.twitch.tv"><div class="tile" style="background:#9146ff">T</div>Twitch</a>
+    <a href="https://vk.com"><div class="tile" style="background:#0077ff">VK</div>ВКонтакте</a>
+    <a href="https://minecraft.wiki"><div class="tile" style="background:#5f9f35">⛏</div>Minecraft Wiki</a>
+    <a href="https://github.com"><div class="tile" style="background:#24292f">GH</div>GitHub</a>
+  </div>
+</body>
+</html>
