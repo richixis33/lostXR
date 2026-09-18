@@ -11,8 +11,8 @@ android {
         applicationId = "com.samrat.cardboardhands"
         minSdk = 29
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.0.0"
+        versionCode = 12
+        versionName = "1.0.1"
         // PhoneXR itself runs 64-bit; this keeps OpenCV and MediaPipe for other ABIs out of the APK.
         ndk { abiFilters += listOf("arm64-v8a") }
     }

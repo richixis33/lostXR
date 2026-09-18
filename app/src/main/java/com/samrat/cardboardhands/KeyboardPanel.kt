@@ -58,7 +58,7 @@ class KeyboardPanel {
         paint.color = if (id == hover) Color.argb(235, 255, 255, 255) else Color.argb(90, 255, 255, 255)
         canvas.drawRoundRect(rect, 18f, 18f, paint)
         paint.color = if (id == hover) Color.rgb(30, 30, 36) else Color.WHITE
-        paint.textSize = 40f
+        paint.textSize = 50f
         paint.textAlign = Paint.Align.CENTER
         canvas.drawText(label, rect.centerX(), rect.centerY() + 14f, paint)
         keys += rect to id

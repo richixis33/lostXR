@@ -21,6 +21,12 @@ object HandGestures {
         val pinchY: Float,
         /** Palm width in image widths; bigger is closer to the camera. */
         val palmWidth: Float,
+        /**
+         * Aim point between the thumb and index bases: follows the hand but not the fingertips, so
+         * the cursor stays put while the fingers pinch (a pinch no longer "jumps" the click).
+         */
+        val aimX: Float = pinchX,
+        val aimY: Float = pinchY,
         /** Thumb-index distance in palm widths; feed it to a [PinchLatch] for a steady click. */
         val pinchGap: Float = 1f
     )
@@ -58,6 +64,8 @@ object HandGestures {
             pinchX = (p[4].x() + p[8].x()) / 2,
             pinchY = (p[4].y() + p[8].y()) / 2,
             palmWidth = palm,
+            aimX = p[2].x() * .3f + p[5].x() * .45f + (p[4].x() + p[8].x()) / 2 * .25f,
+            aimY = p[2].y() * .3f + p[5].y() * .45f + (p[4].y() + p[8].y()) / 2 * .25f,
             pinchGap = gap
         )
     }
@@ -84,14 +92,22 @@ object HandGestures {
      * One Euro filter (Casiez et al.): strong smoothing when the hand is still, little lag when it
      * moves fast. This is what keeps the cursor and controllers from shaking.
      */
-    class OneEuro(private val minCutoff: Float = 1.2f, private val beta: Float = .6f, private val derivativeCutoff: Float = 1f) {
+    class OneEuro(
+        private val minCutoff: Float = 1.2f,
+        private val beta: Float = .6f,
+        private val derivativeCutoff: Float = 1f,
+        /** Changes smaller than this are ignored while the hand rests: no tremor at all when still. */
+        private val deadZone: Float = 0f,
+    ) {
         private var value = Float.NaN
+        private var shown = Float.NaN
         private var derivative = 0f
         private var lastNs = 0L
 
         fun filter(raw: Float, timeNs: Long): Float {
             if (value.isNaN() || lastNs == 0L) {
                 value = raw
+                shown = raw
                 lastNs = timeNs
                 return raw
             }
@@ -101,11 +117,15 @@ object HandGestures {
             derivative += alpha(derivativeCutoff, dt) * (rawDerivative - derivative)
             val cutoff = minCutoff + beta * abs(derivative)
             value += alpha(cutoff, dt) * (raw - value)
-            return value
+            // Hysteresis: the output follows only once the filtered value leaves the dead zone.
+            val gap = value - shown
+            if (abs(gap) > deadZone) shown = value - deadZone * kotlin.math.sign(gap)
+            return shown
         }
 
         fun reset() {
             value = Float.NaN
+            shown = Float.NaN
             derivative = 0f
             lastNs = 0L
         }

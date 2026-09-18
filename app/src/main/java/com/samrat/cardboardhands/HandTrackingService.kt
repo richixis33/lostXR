@@ -354,9 +354,9 @@ class HandTrackingService : LifecycleService() {
         private var y = .5f
         private var z = .5f
         // One Euro filters: calm while the hand holds still, responsive when it moves.
-        private val fx = HandGestures.OneEuro(minCutoff = 1.0f, beta = 1.5f)
-        private val fy = HandGestures.OneEuro(minCutoff = 1.0f, beta = 1.5f)
-        private val fz = HandGestures.OneEuro(minCutoff = .5f, beta = .8f)
+        private val fx = HandGestures.OneEuro(minCutoff = .6f, beta = 1.4f, deadZone = .002f)
+        private val fy = HandGestures.OneEuro(minCutoff = .6f, beta = 1.4f, deadZone = .002f)
+        private val fz = HandGestures.OneEuro(minCutoff = .3f, beta = .6f, deadZone = .004f)
         private var pinchUntilMs = 0L
         private var palmToFace = false
         private var lastSeenMs = 0L

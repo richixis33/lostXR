@@ -17,6 +17,10 @@ class HeadTracker(private val sensors: SensorManager, private val display: () ->
     val head = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
     private val rotation = FloatArray(9)
     @Volatile private var yawOffset = Float.NaN
+    /** Recent head poses with sensor timestamps (elapsedRealtimeNanos), newest last. */
+    private val history = Array(HISTORY) { FloatArray(16) }
+    private val historyTimes = LongArray(HISTORY)
+    private var historyNext = 0
 
     fun start() {
         val sensor = sensors.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
@@ -33,6 +37,25 @@ class HeadTracker(private val sensors: SensorManager, private val display: () ->
 
     /** Copies the head rotation into [out] under the tracker's lock. */
     fun copyHead(out: FloatArray) = synchronized(head) { System.arraycopy(head, 0, out, 0, 16) }
+
+    /**
+     * The head as it was at [timeNanos] (elapsedRealtimeNanos, like camera frame timestamps). Hands
+     * seen in an older camera frame must be turned into the world with the head of that moment,
+     * otherwise every head turn drags the cursor along until the camera catches up.
+     */
+    fun copyHeadAt(timeNanos: Long, out: FloatArray) = synchronized(head) {
+        var best = -1
+        var bestGap = Long.MAX_VALUE
+        for (i in 0 until HISTORY) {
+            val time = historyTimes[i]
+            if (time == 0L) continue
+            val gap = kotlin.math.abs(time - timeNanos)
+            if (gap < bestGap) { bestGap = gap; best = i }
+        }
+        // Without a pose close in time (clock mismatch), the current head is the safer choice.
+        if (best < 0 || bestGap > 250_000_000L) System.arraycopy(head, 0, out, 0, 16)
+        else System.arraycopy(history[best], 0, out, 0, 16)
+    }
 
     override fun onSensorChanged(event: SensorEvent) {
         SensorManager.getRotationMatrixFromVector(rotation, event.values)
@@ -52,8 +75,18 @@ class HeadTracker(private val sensors: SensorManager, private val display: () ->
         gl[15] = 1f
         val recenter = FloatArray(16)
         Matrix.setRotateM(recenter, 0, Math.toDegrees(-yawOffset.toDouble()).toFloat(), 0f, 1f, 0f)
-        synchronized(head) { Matrix.multiplyMM(head, 0, recenter, 0, gl, 0) }
+        synchronized(head) {
+            Matrix.multiplyMM(head, 0, recenter, 0, gl, 0)
+            System.arraycopy(head, 0, history[historyNext], 0, 16)
+            historyTimes[historyNext] = event.timestamp
+            historyNext = (historyNext + 1) % HISTORY
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+    private companion object {
+        /** About half a second of poses at the sensor's fastest rate. */
+        const val HISTORY = 128
+    }
 }

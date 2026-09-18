@@ -1,7 +1,11 @@
 package com.samrat.cardboardhands
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.content.Intent
 import android.content.ServiceConnection
 import android.hardware.SensorManager
@@ -14,16 +18,34 @@ import android.view.MotionEvent
 import android.view.Surface
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlin.concurrent.thread
 
 /**
- * PhoneXR Cinema: runs any app (Minecraft Bedrock first of all) on a virtual display and shows it
- * as a big screen in VR with head tracking. Gamepads and Joy-Con play the game.
+ * PhoneXR Cinema: runs any app (Minecraft, Roblox, Brawl Stars...) on a virtual display and shows it
+ * as a big screen in VR with head tracking. Two hands touch the screen (a pinch is a finger);
+ * gamepads and Joy-Con play the game directly.
  */
-class CinemaActivity : Activity() {
+class CinemaActivity : Activity(), LifecycleOwner {
+    private val lifecycleRegistry = LifecycleRegistry(this)
+    override val lifecycle: Lifecycle get() = lifecycleRegistry
+    private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val trackingExecutor = Executors.newSingleThreadExecutor()
+    private val busy = AtomicBoolean(false)
+    private var handTracker: HandTracker? = null
+    private var cameraProvider: ProcessCameraProvider? = null
+    private var hands: CinemaHands? = null
     private lateinit var surfaceView: GLSurfaceView
     private lateinit var renderer: CinemaRenderer
     private lateinit var tracker: HeadTracker
@@ -41,18 +63,24 @@ class CinemaActivity : Activity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
-        // The model loads in a moment; a missing or broken file falls back to the simple room.
-        val room = runCatching { GlbRoom.load(this, "cinema/living_room.glb") }
-            .onFailure { Log.w(TAG, "Living room model failed to load", it) }
-            .getOrNull()
-        renderer = CinemaRenderer(room, onSurface = { created ->
+        lifecycleRegistry.currentState = Lifecycle.State.CREATED
+        // The place loads in a moment; a missing or broken file falls back to a built-in scene.
+        val sceneName = intent.getStringExtra(EXTRA_SCENE) ?: SCENE_ROOM
+        val place: CinemaScene? = runCatching {
+            when (sceneName) {
+                SCENE_ROBLOX -> GlbScene.load(this, "cinema/roblox_house.glb", GlbScene.ROBLOX_HOUSE)
+                SCENE_BRAWL -> PanoramaScene(assets.open("cinema/brawl.jpg").use { BitmapFactory.decodeStream(it) })
+                SCENE_SKY -> null
+                else -> LivingRoomScene(GlbRoom.load(this, "cinema/living_room.glb"))
+            }
+        }.onFailure { Log.w(TAG, "Scene $sceneName failed to load", it) }.getOrNull()
+        renderer = CinemaRenderer(place, onSurface = { created ->
             surface = created
             startDisplay()
         })
         tracker = HeadTracker(getSystemService(SensorManager::class.java)) { display }
         renderer.head = tracker.head
-        renderer.scene = if (intent.getStringExtra(EXTRA_SCENE) == SCENE_SKY) CinemaRenderer.Scene.SKY
-        else CinemaRenderer.Scene.ROOM
+        renderer.scene = if (sceneName == SCENE_ROOM) CinemaRenderer.Scene.ROOM else CinemaRenderer.Scene.SKY
         surfaceView = GLSurfaceView(this).apply {
             setEGLContextClientVersion(2)
             setRenderer(renderer)
@@ -61,16 +89,64 @@ class CinemaActivity : Activity() {
         }
         setContentView(surfaceView)
 
-        // Hand tracking would hold the camera and the Joy-Con for VR controllers; the cinema needs neither.
+        // The OpenXR hand service would hold the camera; the cinema tracks hands itself.
         stopService(Intent(this, HandTrackingService::class.java))
         connection = VirtualScreen.bind(this) { bound ->
             service = bound
             if (bound == null) toast("Служба Shizuku отключилась") else startDisplay()
         }
+        hands = CinemaHands(
+            tracker,
+            placement = { renderer.screenPlacement },
+            onCursors = { renderer.cursors = it },
+            onGhosts = { renderer.ghosts = it },
+            inject = { event ->
+                val id = displayId
+                if (id >= 0) runCatching { service?.injectMotion(event, id) }
+            },
+        )
+        trackingExecutor.execute {
+            handTracker = runCatching { HandTracker(this, useGpu = true) { hands?.onResult(it) } }
+                .getOrElse { HandTracker(this, useGpu = false) { hands?.onResult(it) } }
+        }
+    }
+
+    /** The back camera feeds the hands; the picture itself is never shown in the cinema. */
+    private fun bindCamera() {
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            val provider = future.get()
+            cameraProvider = provider
+            val analysis = ImageAnalysis.Builder()
+                .setTargetResolution(android.util.Size(640, 480))
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+            analysis.setAnalyzer(cameraExecutor) { image ->
+                try {
+                    if (busy.compareAndSet(false, true)) {
+                        val upright: Bitmap = image.toBitmap().rotate(image.imageInfo.rotationDegrees)
+                        val timestamp = image.imageInfo.timestamp / 1_000_000L
+                        trackingExecutor.execute {
+                            try { handTracker?.detect(upright, timestamp) } finally { upright.recycle(); busy.set(false) }
+                        }
+                    }
+                } catch (error: Throwable) {
+                    busy.set(false)
+                    Log.w(TAG, "Camera frame failed", error)
+                } finally {
+                    image.close()
+                }
+            }
+            provider.unbindAll()
+            runCatching { provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, analysis) }
+                .onFailure { toast("Камера занята: руки в кинотеатре не работают") }
+        }, ContextCompat.getMainExecutor(this))
     }
 
     override fun onResume() {
         super.onResume()
+        lifecycleRegistry.currentState = Lifecycle.State.RESUMED
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) bindCamera()
         surfaceView.onResume()
         tracker.start()
         setJoyConPassthrough(this, true)
@@ -78,12 +154,19 @@ class CinemaActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        lifecycleRegistry.currentState = Lifecycle.State.STARTED
+        cameraProvider?.unbindAll()
+        hands?.releaseAll()
         surfaceView.onPause()
         tracker.stop()
         setJoyConPassthrough(this, false)
     }
 
     override fun onDestroy() {
+        lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+        cameraExecutor.shutdownNow()
+        trackingExecutor.execute { handTracker?.close() }
+        trackingExecutor.shutdown()
         running = false
         runCatching { service?.releaseDisplay() }
         connection?.let { VirtualScreen.unbind(this, it) }
@@ -153,6 +236,8 @@ class CinemaActivity : Activity() {
         const val EXTRA_SCENE = "scene"
         const val SCENE_ROOM = "room"
         const val SCENE_SKY = "sky"
+        const val SCENE_ROBLOX = "roblox"
+        const val SCENE_BRAWL = "brawl"
         const val ACTION_JOYCON_PASSTHROUGH = "com.samrat.cardboardhands.JOYCON_PASSTHROUGH"
 
         /** While the cinema is in front, Joy-Con buttons go to the game as a gamepad, not to VR controllers. */

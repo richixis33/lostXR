@@ -18,11 +18,22 @@ import javax.microedition.khronos.opengles.GL10
  * screen that shows the game running on the virtual display.
  */
 class CinemaRenderer(
-    /** The living-room model; loaded off the GL thread, uploaded on it. Null falls back to a simple room. */
-    private val room: GlbRoom?,
+    /** The place (room model, panorama); loaded off the GL thread, uploaded on it. Null: a built-in scene. */
+    private val model: CinemaScene?,
     private val onSurface: (Surface) -> Unit,
 ) : GLSurfaceView.Renderer {
     enum class Scene { ROOM, SKY }
+
+    /** A hand's touch point on the screen: u, v in 0..1 and whether it presses. */
+    class Cursor(val u: Float, val v: Float, val pressed: Boolean)
+
+    /** Up to two cursors, one per hand; written by the hand thread. */
+    @Volatile var cursors: List<Cursor> = emptyList()
+    /** See-through hands in head space, drawn over everything like in the VR home. */
+    @Volatile var ghosts: List<FloatArray> = emptyList()
+    /** Where the screen is, for hit tests from the hand thread (centre y, z, width). */
+    val screenPlacement: FloatArray get() = if (model != null) floatArrayOf(model.screenCenterY, model.screenZ, model.screenWidth, model.eyeHeight)
+        else floatArrayOf(SCREEN_CENTER_Y, SCREEN_Z, SCREEN_WIDTH, EYE_HEIGHT)
 
     @Volatile var scene = Scene.ROOM
         set(value) { field = value; sceneDirty.set(true) }
@@ -35,6 +46,8 @@ class CinemaRenderer(
     private var screenTexture = 0
     private var colorProgram = 0
     private var screenProgram = 0
+    private var cursorProgram = 0
+    private var ghostProgram = 0
     private var sceneMesh: Mesh? = null
     private var width = 1
     private var height = 1
@@ -49,6 +62,8 @@ class CinemaRenderer(
     override fun onSurfaceCreated(unused: GL10?, config: EGLConfig?) {
         colorProgram = program(COLOR_VERTEX, COLOR_FRAGMENT)
         screenProgram = program(SCREEN_VERTEX, SCREEN_FRAGMENT)
+        cursorProgram = program(SCREEN_VERTEX, CURSOR_FRAGMENT)
+        ghostProgram = program(GHOST_VERTEX, GHOST_FRAGMENT)
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
         screenTexture = textures[0]
@@ -60,7 +75,7 @@ class CinemaRenderer(
             setOnFrameAvailableListener { frameReady.set(true) }
         }
         surfaceTexture = texture
-        room?.upload()
+        model?.upload()
         sceneDirty.set(true)
         onSurface(Surface(texture))
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
@@ -77,21 +92,22 @@ class CinemaRenderer(
         if (sceneDirty.getAndSet(false)) {
             sceneMesh?.release()
             sceneMesh = when {
+                model != null -> null
                 scene == Scene.SKY -> buildSky()
-                room != null -> null
                 else -> buildRoom()
             }
         }
         val sky = scene == Scene.SKY
-        GLES20.glClearColor(if (sky) .55f else .05f, if (sky) .75f else .04f, if (sky) .98f else .04f, 1f)
+        val clear = model?.clearColor ?: if (sky) floatArrayOf(.55f, .75f, .98f) else floatArrayOf(.05f, .04f, .04f)
+        GLES20.glClearColor(clear[0], clear[1], clear[2], 1f)
         GLES20.glViewport(0, 0, width, height)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
         synchronized(head) { System.arraycopy(head, 0, headCopy, 0, 16) }
-        val model = scene == Scene.ROOM && room != null
+        val place = screenPlacement
         // World to head: inverse rotation, then the seated eye height.
         Matrix.transposeM(worldToHead, 0, headCopy, 0)
-        Matrix.translateM(worldToHead, 0, 0f, -(if (model) GlbRoom.EYE_HEIGHT else EYE_HEIGHT), 0f)
+        Matrix.translateM(worldToHead, 0, 0f, -place[3], 0f)
 
         val eyeWidth = width / 2
         Matrix.perspectiveM(projection, 0, FOV_Y, eyeWidth.toFloat() / height, .05f, 200f)
@@ -101,9 +117,10 @@ class CinemaRenderer(
             Matrix.translateM(eye, 0, if (index == 0) IPD / 2 else -IPD / 2, 0f, 0f)
             Matrix.multiplyMM(view, 0, eye, 0, worldToHead, 0)
             Matrix.multiplyMM(viewProjection, 0, projection, 0, view, 0)
-            if (model) room!!.draw(viewProjection) else sceneMesh?.draw(colorProgram, viewProjection)
-            if (model) drawScreen(viewProjection, GlbRoom.screenWidth, GlbRoom.screenCenterY, GlbRoom.screenZ)
-            else drawScreen(viewProjection, SCREEN_WIDTH, SCREEN_CENTER_Y, SCREEN_Z)
+            if (model != null) model.draw(viewProjection) else sceneMesh?.draw(colorProgram, viewProjection)
+            drawScreen(viewProjection, place[2], place[0], place[1])
+            drawCursors(viewProjection, place[2], place[0], place[1])
+            drawGhosts()
         }
     }
 
@@ -132,6 +149,66 @@ class CinemaRenderer(
         GLES20.glVertexAttribPointer(uv, 2, GLES20.GL_FLOAT, false, 20, buffer)
         GLES20.glEnableVertexAttribArray(uv)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+    }
+
+    /** Hand cursors: soft rings just in front of the screen, filled while touching. */
+    private fun drawCursors(mvp: FloatArray, screenWidth: Float, cy: Float, z: Float) {
+        val list = cursors
+        if (list.isEmpty()) return
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glUseProgram(cursorProgram)
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(cursorProgram, "uMvp"), 1, false, mvp, 0)
+        val halfW = screenWidth / 2
+        val halfH = screenWidth * SCREEN_PIXELS_H / SCREEN_PIXELS_W / 2
+        val r = screenWidth * .018f
+        for (cursor in list) {
+            val x = -halfW + cursor.u * screenWidth
+            val y = cy + halfH - cursor.v * halfH * 2
+            GLES20.glUniform1f(GLES20.glGetUniformLocation(cursorProgram, "uPressed"), if (cursor.pressed) 1f else 0f)
+            val quad = floatArrayOf(
+                x - r, y - r, z + .01f, 0f, 1f,
+                x + r, y - r, z + .01f, 1f, 1f,
+                x - r, y + r, z + .01f, 0f, 0f,
+                x + r, y + r, z + .01f, 1f, 0f,
+            )
+            val buffer = floatBuffer(quad)
+            val position = GLES20.glGetAttribLocation(cursorProgram, "aPosition")
+            val uv = GLES20.glGetAttribLocation(cursorProgram, "aUv")
+            buffer.position(0)
+            GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, 20, buffer)
+            GLES20.glEnableVertexAttribArray(position)
+            buffer.position(3)
+            GLES20.glVertexAttribPointer(uv, 2, GLES20.GL_FLOAT, false, 20, buffer)
+            GLES20.glEnableVertexAttribArray(uv)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        }
+        GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    /** Hands in head space: blended once per pixel thanks to the depth test on one flat plane. */
+    private fun drawGhosts() {
+        val list = ghosts
+        if (list.isEmpty()) return
+        val mvp = FloatArray(16)
+        Matrix.multiplyMM(mvp, 0, projection, 0, eye, 0)
+        GLES20.glClear(GLES20.GL_DEPTH_BUFFER_BIT)
+        GLES20.glDepthFunc(GLES20.GL_LESS)
+        GLES20.glDisable(GLES20.GL_CULL_FACE)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glUseProgram(ghostProgram)
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(ghostProgram, "uMvp"), 1, false, mvp, 0)
+        val position = GLES20.glGetAttribLocation(ghostProgram, "aPosition")
+        for (triangles in list) {
+            val buffer = floatBuffer(triangles)
+            GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, 12, buffer)
+            GLES20.glEnableVertexAttribArray(position)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, triangles.size / 3)
+        }
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glEnable(GLES20.GL_CULL_FACE)
+        GLES20.glDepthFunc(GLES20.GL_LESS)
     }
 
     // ------------------------------------------------------------------ Scenes
@@ -305,6 +382,24 @@ class CinemaRenderer(
             void main() {
                 vUv = aUv;
                 gl_Position = uMvp * vec4(aPosition, 1.0);
+            }"""
+        private const val GHOST_VERTEX = """
+            uniform mat4 uMvp;
+            attribute vec3 aPosition;
+            void main() { gl_Position = uMvp * vec4(aPosition, 1.0); }"""
+        private const val GHOST_FRAGMENT = """
+            precision mediump float;
+            void main() { gl_FragColor = vec4(0.93, 0.95, 1.0, 0.38); }"""
+        private const val CURSOR_FRAGMENT = """
+            precision mediump float;
+            uniform float uPressed;
+            varying vec2 vUv;
+            void main() {
+                float d = length(vUv - vec2(0.5)) * 2.0;
+                float ring = smoothstep(1.0, 0.85, d) * smoothstep(0.45, 0.6, d);
+                float fill = uPressed * smoothstep(0.62, 0.5, d);
+                float alpha = max(ring * 0.95, fill * 0.9);
+                gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);
             }"""
         private const val SCREEN_FRAGMENT = """
             #extension GL_OES_EGL_image_external : require

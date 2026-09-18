@@ -42,3 +42,4 @@ gearvr-shim/third_party/
 gearvr-shim/build32/
 app/src/main/assets/daydream/
 __pycache__/
+app/src/main/assets/runtime/

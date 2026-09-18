@@ -32,13 +32,18 @@ object Daydream {
             Toast.makeText(activity, "Opendream Services нет в этой сборке PhoneXR", Toast.LENGTH_LONG).show()
             return
         }
+        installAsset(activity, ASSET, "opendream-services.apk")
+    }
+
+    /** Copies an APK shipped in PhoneXR's assets to the shared cache and opens the system installer. */
+    fun installAsset(activity: Activity, asset: String, fileName: String) {
         if (!activity.packageManager.canRequestPackageInstalls()) {
             Toast.makeText(activity, "Разрешите PhoneXR устанавливать приложения и повторите", Toast.LENGTH_LONG).show()
             activity.startActivity(Intent(AndroidSettings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
             return
         }
-        val file = File(File(activity.cacheDir, "patched").apply { mkdirs() }, "opendream-services.apk")
-        activity.assets.open(ASSET).use { input -> file.outputStream().use { input.copyTo(it) } }
+        val file = File(File(activity.cacheDir, "patched").apply { mkdirs() }, fileName)
+        activity.assets.open(asset).use { input -> file.outputStream().use { input.copyTo(it) } }
         val content = FileProvider.getUriForFile(activity, "${activity.packageName}.patched.apks", file)
         activity.startActivity(Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(content, "application/vnd.android.package-archive")

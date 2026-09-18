@@ -76,6 +76,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private var storeItems by mutableStateOf<List<GameStore.Item>?>(null)
+    /** A VR mode from the store whose activation steps are shown. */
+    private var guide by mutableStateOf<VrMode?>(null)
     private var webApps by mutableStateOf<List<WebApps.App>>(emptyList())
     private var installedWeb by mutableStateOf<Set<String>>(emptySet())
     private var storeError by mutableStateOf<String?>(null)
@@ -168,6 +170,7 @@ class MainActivity : ComponentActivity() {
         }
 
         pendingPatch?.let { PatchDialog(it) }
+        guide?.let { GuideDialog(it) }
         ready?.let { ReadyDialog(it) }
         error?.let { message ->
             CupertinoAlertDialog(
@@ -227,6 +230,8 @@ class MainActivity : ComponentActivity() {
                 HigLink("Магазин игр") { selectTab(1) }
             }
 
+            RuntimeSection()
+
             CinemaSection()
 
             HigSection(
@@ -247,6 +252,31 @@ class MainActivity : ComponentActivity() {
                     status = "Трекинг остановлен"
                 }
             }
+        }
+    }
+
+    /** PhoneXR Runtime for OpenXR games: install or update it, then pick it in the OpenXR broker. */
+    @Composable
+    private fun RuntimeSection() {
+        val state = if (resumes >= 0) PhoneXrRuntime.state(this) else PhoneXrRuntime.State.MISSING
+        HigSection(
+            title = "OpenXR",
+            footer = "PhoneXR Runtime заменяет Monado: OpenXR‑игры получают руки, Joy‑Con и голову от PhoneXR. " +
+                "После установки выберите «PhoneXR Runtime» в OpenXR Runtime Broker."
+        ) {
+            when (state) {
+                PhoneXrRuntime.State.READY -> HigRow("PhoneXR Runtime", "Установлен")
+                PhoneXrRuntime.State.OUTDATED -> HigLink("Обновить PhoneXR Runtime") { PhoneXrRuntime.install(this@MainActivity) }
+                PhoneXrRuntime.State.MISSING -> if (PhoneXrRuntime.bundled(this@MainActivity)) {
+                    HigLink("Установить PhoneXR Runtime") { PhoneXrRuntime.install(this@MainActivity) }
+                } else {
+                    HigRow("PhoneXR Runtime", "Не входит в эту сборку")
+                }
+            }
+            HigLink(
+                "OpenXR Runtime Broker",
+                value = if (PhoneXrRuntime.brokerInstalled(this@MainActivity)) "Открыть" else "Google Play"
+            ) { PhoneXrRuntime.openBroker(this@MainActivity) }
         }
     }
 
@@ -276,6 +306,12 @@ class MainActivity : ComponentActivity() {
             HigChoice("В воздухе", "Парящий остров над миром и облаками", cinemaScene == CinemaActivity.SCENE_SKY) {
                 cinemaScene = CinemaActivity.SCENE_SKY
             }
+            HigChoice("Дом из Roblox", "Гостиная Brookhaven, экран над камином", cinemaScene == CinemaActivity.SCENE_ROBLOX) {
+                cinemaScene = CinemaActivity.SCENE_ROBLOX
+            }
+            HigChoice("Арена Brawl Stars", "360° панорама вокруг", cinemaScene == CinemaActivity.SCENE_BRAWL) {
+                cinemaScene = CinemaActivity.SCENE_BRAWL
+            }
             if (minecraft) {
                 HigLink("Играть в Minecraft", enabled = shizuku == VirtualScreen.Access.READY) { openCinema(MINECRAFT) }
             } else {
@@ -303,11 +339,11 @@ class MainActivity : ComponentActivity() {
             .distinctBy { it.first }
             .sortedBy { it.second.lowercase() }
 
-    private fun openCinema(target: String) {
+    private fun openCinema(target: String, scene: String = cinemaScene) {
         startActivity(
             Intent(this, CinemaActivity::class.java)
                 .putExtra(CinemaActivity.EXTRA_PACKAGE, target)
-                .putExtra(CinemaActivity.EXTRA_SCENE, cinemaScene)
+                .putExtra(CinemaActivity.EXTRA_SCENE, scene)
         )
     }
 
@@ -349,9 +385,16 @@ class MainActivity : ComponentActivity() {
     private fun StoreTab() {
         HigPage(
             title = "Магазин",
-            subtitle = "VR-игры с сервера PhoneXR. Игры Gear VR подготавливаются автоматически.",
+            subtitle = "VR-игры с сервера PhoneXR: скачиваются и ставятся как есть.",
             bottomInset = TAB_BAR_ROOM
         ) {
+            HigSection(
+                title = "VR‑режимы",
+                footer = "Обычные Minecraft и Roblox на большом экране в VR: своя комната, поворот головы, " +
+                    "игра двумя руками или Joy‑Con. Нажмите на режим — появится инструкция."
+            ) {
+                VR_MODES.forEach { mode -> VrModeRow(mode) }
+            }
             val items = storeItems
             HigSection(
                 title = "Игры",
@@ -387,6 +430,74 @@ class MainActivity : ComponentActivity() {
             }
             HigSection {
                 HigLink(if (storeLoading) "Обновление…" else "Обновить", enabled = !storeLoading) { refreshStore() }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCupertinoApi::class)
+    @Composable
+    private fun SectionScope.VrModeRow(mode: VrMode) {
+        val installed = resumes >= 0 && isInstalled(mode.packageName)
+        SectionLink(
+            onClick = { guide = mode },
+            icon = { AppIcon(if (installed) mode.packageName else packageName) },
+            caption = {
+                if (installed) {
+                    CupertinoText("Играть", color = CupertinoTheme.colorScheme.accent)
+                } else {
+                    CupertinoText("Скачать", color = CupertinoTheme.colorScheme.accent)
+                }
+            },
+            title = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    CupertinoText(mode.title)
+                    CupertinoText(
+                        mode.subtitle,
+                        style = CupertinoTheme.typography.footnote,
+                        color = CupertinoTheme.colorScheme.secondaryLabel
+                    )
+                }
+            }
+        )
+    }
+
+    /** How to switch a VR mode on: the game from Google Play, Shizuku, then play from PhoneXR. */
+    @OptIn(ExperimentalCupertinoApi::class)
+    @Composable
+    private fun GuideDialog(mode: VrMode) {
+        val installed = resumes >= 0 && isInstalled(mode.packageName)
+        val ready = shizuku == VirtualScreen.Access.READY
+        CupertinoAlertDialog(
+            onDismissRequest = { guide = null },
+            title = { CupertinoText("Как включить ${mode.title}") },
+            message = {
+                CupertinoText(
+                    listOf(
+                        (if (installed) "✓ " else "1. ") + "Установите ${mode.game} из Google Play.",
+                        (if (ready) "✓ " else "2. ") + "Установите и запустите Shizuku (через отладку по Wi‑Fi), разрешите доступ PhoneXR.",
+                        "3. Нажмите «Играть»: игра откроется на большом экране — ${mode.scene}.",
+                        "4. Управление: щипок любой руки — нажатие по экрану, две руки — два пальца. " +
+                            "Joy‑Con и геймпад работают как в самой игре. Тап по телефону выравнивает вид.",
+                    ).joinToString("\n")
+                )
+            }
+        ) {
+            cancel(onClick = { guide = null }) { CupertinoText("Закрыть") }
+            when {
+                !installed -> default(onClick = {
+                    guide = null
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${mode.packageName}")))
+                }) { CupertinoText("Скачать") }
+                !ready -> default(onClick = {
+                    guide = null
+                    if (shizuku == VirtualScreen.Access.NEEDS_PERMISSION) VirtualScreen.requestPermission()
+                    else packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")?.let { startActivity(it) }
+                        ?: startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=moe.shizuku.privileged.api")))
+                }) { CupertinoText("Shizuku") }
+                else -> default(onClick = {
+                    guide = null
+                    openCinema(mode.packageName, mode.sceneId)
+                }) { CupertinoText("Играть") }
             }
         }
     }
@@ -473,12 +584,14 @@ class MainActivity : ComponentActivity() {
         downloads[item.path] = 0f
         Thread {
             try {
-                val file = GameStore.download(item, File(cacheDir, "store")) { value ->
+                val file = GameStore.download(item, File(cacheDir, "patched/store")) { value ->
                     runOnUiThread { downloads[item.path] = value }
                 }
                 runOnUiThread {
                     downloads.remove(item.path)
-                    patch(Uri.fromFile(file), replaces = null, label = item.title)
+                    // Store games install exactly as published; only .pxr packages still need unpacking.
+                    if (item.extension == "pxr") patch(Uri.fromFile(file), replaces = null, label = item.title)
+                    else installApk(file)
                 }
             } catch (failure: Throwable) {
                 android.util.Log.e("PhoneXR-Store", "Download failed: ${item.path}", failure)
@@ -506,10 +619,6 @@ class MainActivity : ComponentActivity() {
                 HigLink("Joy‑Con через камеру") { start(JoyConCameraActivity::class.java) }
             }
             HigSection(title = "Проверка") {
-                HigLink("Проверить руки") {
-                    stopService(Intent(this@MainActivity, HandTrackingService::class.java))
-                    start(HandTestActivity::class.java)
-                }
                 HigLink("Проверить гироскоп Joy‑Con") { start(GyroTestActivity::class.java) }
             }
             HigSection(title = "Магазин", footer = "Игры берутся из папки «${GameStore.FOLDER}» в Supabase и из файлов .json в корне репозитория PhoneXR на GitHub.") {
@@ -659,6 +768,24 @@ class MainActivity : ComponentActivity() {
         return archive.packageName.takeIf { signers(archive) != signers(installed) }
     }
 
+    /** Opens the system installer for an APK in the shared cache folder. */
+    private fun installApk(file: File) {
+        if (!packageManager.canRequestPackageInstalls()) {
+            error = "Разрешите PhoneXR устанавливать приложения, вернитесь и скачайте снова."
+            startActivity(Intent(AndroidSettings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
+        signatureConflict(file)?.let { conflict ->
+            error = "Эта игра уже установлена с другой подписью ($conflict). Удалите её и скачайте снова."
+            return
+        }
+        val content = FileProvider.getUriForFile(this, "$packageName.patched.apks", file)
+        startActivity(Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(content, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
     private fun install(result: ApkPatcher.Result) {
         if (!packageManager.canRequestPackageInstalls()) {
             error = "Разрешите PhoneXR устанавливать приложения, вернитесь и нажмите «Установить» снова."
@@ -680,9 +807,20 @@ class MainActivity : ComponentActivity() {
     private fun isInstalled(target: String) =
         runCatching { packageManager.getApplicationInfo(target, 0) }.isSuccess
 
+    /** A normal game played on the big VR screen (cinema) with its own scene. */
+    private data class VrMode(
+        val title: String, val game: String, val packageName: String,
+        val subtitle: String, val scene: String, val sceneId: String,
+    )
+
     companion object {
         private const val KEY_TAB = "tab"
         private const val MINECRAFT = "com.mojang.minecraftpe"
+        private val VR_MODES = listOf(
+            VrMode("Minecraft VR", "Minecraft", MINECRAFT, "Bedrock в гостиной с камином", "гостиная из Minecraft VR", CinemaActivity.SCENE_ROOM),
+            VrMode("Roblox VR", "Roblox", "com.roblox.client", "Roblox в доме из Brookhaven", "дом из Roblox с камином", CinemaActivity.SCENE_ROBLOX),
+            VrMode("Brawl Stars VR", "Brawl Stars", "com.supercell.brawlstars", "Brawl Stars посреди арены", "360° панорама арены", CinemaActivity.SCENE_BRAWL),
+        )
         /** Height of the floating tab bar plus its margin. */
         private val TAB_BAR_ROOM = 120.dp
     }

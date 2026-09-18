@@ -49,6 +49,10 @@
             <data android:scheme="https" />
         </intent>
         <package android:name="org.godotengine.open_saber" />
+        <package android:name="org.freedesktop.monado.openxr_runtime.out_of_process" />
+        <package android:name="org.khronos.openxr.runtime_broker" />
+        <package android:name="com.roblox.client" />
+        <package android:name="com.supercell.brawlstars" />
     </queries>
 
     <application

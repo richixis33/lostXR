@@ -118,8 +118,10 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     private var wasPinching = false
     private var joyConDown = false
     private var stickHeldUntil = 0L
-    private val filterX = HandGestures.OneEuro(minCutoff = .8f, beta = 2.5f)
-    private val filterY = HandGestures.OneEuro(minCutoff = .8f, beta = 2.5f)
+    private val filterX = HandGestures.OneEuro(minCutoff = .45f, beta = 1.2f, deadZone = .0025f)
+    private val filterY = HandGestures.OneEuro(minCutoff = .45f, beta = 1.2f, deadZone = .0025f)
+    /** Which hand drives the cursor: the one that pinches first keeps it until it lets go. */
+    private var activeLeft: Boolean? = null
     private var lastMoveSent = 0L
 
     private var games = emptyMap<String, GameLibrary.Game>()
@@ -445,19 +447,27 @@ class VrHomeActivity : Activity(), LifecycleOwner {
 
     private fun onHands(result: HandLandmarkerResult) {
         val now = SystemClock.elapsedRealtimeNanos()
-        var best: HandGestures.Shape? = null
+        // The camera frame this result belongs to: the head is looked up for that moment.
+        val frameNs = result.timestampMs() * 1_000_000L
         handPoints = result.landmarks().filter { it.size >= 21 }.map { points ->
-            FloatArray(42) { i -> if (i % 2 == 0) points[i / 2].x() else points[i / 2].y() }
+            FloatArray(63) { i -> when (i % 3) { 0 -> points[i / 3].x(); 1 -> points[i / 3].y(); else -> points[i / 3].z() } }
         }
-        result.landmarks().forEachIndexed { index, points ->
-            if (points.size < 21) return@forEachIndexed
+        val hands = result.landmarks().mapIndexedNotNull { index, points ->
+            if (points.size < 21) return@mapIndexedNotNull null
             val physicalLeft = result.handednesses().getOrNull(index)?.firstOrNull()?.categoryName().equals("Right", true)
-            val shape = HandGestures.shape(points, physicalLeft)
-            val current = best
-            if (current == null || shape.palmWidth > current.palmWidth) best = shape
+            physicalLeft to HandGestures.shape(points, physicalLeft)
         }
-        val hand = best
+        // Keep the hand that holds the cursor; otherwise a pinching hand, otherwise the nearest one.
+        val chosen = hands.firstOrNull { it.first == activeLeft && (pinchLatch.pinching || wasPinching) }
+            ?: hands.firstOrNull { it.second.pinchGap < .3f }
+            ?: hands.maxByOrNull { it.second.palmWidth }
+        if (chosen != null && chosen.first != activeLeft) {
+            if (activeLeft != null) { filterX.reset(); filterY.reset() }
+            activeLeft = chosen.first
+        }
+        val hand = chosen?.second
         if (hand == null) {
+            activeLeft = null
             filterX.reset(); filterY.reset(); pinchLatch.reset()
             ray = null
             pinchPoint = null
@@ -465,9 +475,9 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             updateHit(null)
             return
         }
-        val x = filterX.filter(hand.pinchX, now)
-        val y = filterY.filter(hand.pinchY, now)
-        val direction = pointerRay(x, y)
+        val x = filterX.filter(hand.aimX, now)
+        val y = filterY.filter(hand.aimY, now)
+        val direction = pointerRay(x, y, frameNs)
         ray = direction
         pinchPoint = floatArrayOf(x, y)
         val target = hitTest(direction)
@@ -509,9 +519,9 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     }
 
     /** The fingers' pinch point seen from the eyes, as a world direction. */
-    private fun pointerRay(x: Float, y: Float): FloatArray {
+    private fun pointerRay(x: Float, y: Float, frameNs: Long): FloatArray {
         val head = FloatArray(16)
-        tracker.copyHead(head)
+        tracker.copyHeadAt(frameNs, head)
         val local = floatArrayOf((x - .5f) * 2f * viewScaleX, (.5f - y) * 2f * viewScaleY, -1f, 0f)
         val world = FloatArray(4)
         Matrix.multiplyMV(world, 0, head, 0, local, 0)
@@ -1063,39 +1073,57 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         }
 
         /**
-         * The user's hand as a white skeleton over the passthrough, and the cursor on the pinch point.
-         * Drawn in head space with the passthrough's own mapping, so it lines up with the real fingers.
+         * The user's hands as see-through white shapes over the passthrough, and the cursor on the
+         * aim point. Drawn in head space with the passthrough's own mapping, so they sit on the real hands.
          */
         private fun hand() {
             val hands = handPoints
             Matrix.multiplyMM(mvp, 0, projection, 0, eye, 0)
             GLES20.glUseProgram(colorProgram)
             GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(colorProgram, "uMvp"), 1, false, mvp, 0)
-            GLES20.glUniform4f(GLES20.glGetUniformLocation(colorProgram, "uColor"), 1f, 1f, 1f, .92f)
-            GLES20.glLineWidth(7f)
+            val position = GLES20.glGetAttribLocation(colorProgram, "aPosition")
+            // Every triangle lies at one depth: with GL_LESS each pixel is blended once, so the
+            // overlapping fingers and joints read as one smooth translucent hand.
+            GLES20.glClear(GLES20.GL_DEPTH_BUFFER_BIT)
+            GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+            GLES20.glDepthFunc(GLES20.GL_LESS)
+            GLES20.glUniform4f(GLES20.glGetUniformLocation(colorProgram, "uColor"), .93f, .95f, 1f, .42f)
             for (points in hands) {
-                val lines = FloatArray(HAND_BONES.size * 10)
-                HAND_BONES.forEachIndexed { i, (a, b) ->
-                    for ((k, index) in listOf(a, b).withIndex()) {
-                        val offset = i * 10 + k * 5
-                        lines[offset] = (points[index * 2] - .5f) * 2f * viewScaleX
-                        lines[offset + 1] = (.5f - points[index * 2 + 1]) * 2f * viewScaleY
-                        lines[offset + 2] = -1f
-                    }
-                }
-                val buffer = ByteBuffer.allocateDirect(lines.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(lines)
+                val xs = FloatArray(21) { (points[it * 3] - .5f) * 2f * viewScaleX }
+                val ys = FloatArray(21) { (.5f - points[it * 3 + 1]) * 2f * viewScaleY }
+                val triangles = GhostHand.triangles(xs, ys, -1f)
+                val buffer = ByteBuffer.allocateDirect(triangles.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(triangles)
                 buffer.position(0)
-                val position = GLES20.glGetAttribLocation(colorProgram, "aPosition")
-                GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, 20, buffer)
+                GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, 12, buffer)
                 GLES20.glEnableVertexAttribArray(position)
-                GLES20.glDrawArrays(GLES20.GL_LINES, 0, HAND_BONES.size * 2)
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, triangles.size / 3)
             }
+            GLES20.glDisable(GLES20.GL_DEPTH_TEST)
             val point = pinchPoint ?: return
             val x = (point[0] - .5f) * 2f * viewScaleX
             val y = (.5f - point[1]) * 2f * viewScaleY
-            val r = if (pressing) .012f else .02f
+            val r = if (pressing) .010f else .016f
+            // A ring cursor: dark edge, white centre, readable over any background.
+            GLES20.glUniform4f(GLES20.glGetUniformLocation(colorProgram, "uColor"), 0f, 0f, 0f, .45f)
+            disc(x, y, r * 1.45f, position)
             GLES20.glUniform4f(GLES20.glGetUniformLocation(colorProgram, "uColor"), 1f, 1f, 1f, 1f)
-            draw(colorProgram, floatArrayOf(x - r, y - r, -1f, 0f, 0f, x + r, y - r, -1f, 0f, 0f, x - r, y + r, -1f, 0f, 0f, x + r, y + r, -1f, 0f, 0f), false)
+            disc(x, y, r, position)
+        }
+
+        private fun disc(x: Float, y: Float, r: Float, position: Int) {
+            val data = FloatArray(3 * 18) { i ->
+                val k = i / 3
+                when (i % 3) {
+                    0 -> if (k == 0) x else x + kotlin.math.cos(((k - 1) * 2 * Math.PI / 16).toFloat()) * r
+                    1 -> if (k == 0) y else y + kotlin.math.sin(((k - 1) * 2 * Math.PI / 16).toFloat()) * r
+                    else -> -1f
+                }
+            }
+            val buffer = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(data)
+            buffer.position(0)
+            GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, 12, buffer)
+            GLES20.glEnableVertexAttribArray(position)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_FAN, 0, 18)
         }
 
         private fun quad(program: Int, texture: Int, matrix: FloatArray, data: FloatArray, external: Boolean = false) {
@@ -1162,9 +1190,9 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         private const val MENU_HOME = "menu:home"
         private const val MENU_EXIT = "menu:exit"
         private const val MENU_PHOTO = "menu:photo"
-        private const val KEYBOARD_W = 1.05f
+        private const val KEYBOARD_W = 1.7f
         private val KEYBOARD_H = KEYBOARD_W * KeyboardPanel.HEIGHT / KeyboardPanel.WIDTH
-        private const val KEYBOARD_RADIUS = 1.2f
+        private const val KEYBOARD_RADIUS = 1.15f
         private const val KEYBOARD_BUTTON_GAP = .1f
         private const val MIN_SCALE = .45f
         private const val MAX_SCALE = 2.2f
@@ -1181,11 +1209,6 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         private const val TOOLBAR_GAP = .03f
         /** Share of the bar width taken by each button at its ends. */
         private const val TOOLBAR_BUTTON = .1f
-        /** MediaPipe hand skeleton. */
-        private val HAND_BONES = listOf(
-            0 to 1, 1 to 2, 2 to 3, 3 to 4, 0 to 5, 5 to 6, 6 to 7, 7 to 8, 5 to 9, 9 to 10, 10 to 11, 11 to 12,
-            9 to 13, 13 to 14, 14 to 15, 15 to 16, 13 to 17, 17 to 18, 18 to 19, 19 to 20, 0 to 17,
-        )
 
         private const val TEXTURE_VERTEX = """
             uniform mat4 uMvp;
