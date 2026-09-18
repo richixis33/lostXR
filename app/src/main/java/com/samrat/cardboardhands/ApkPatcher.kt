@@ -124,8 +124,11 @@ object ApkPatcher {
                             entry.compressedSize = original.size
                             entry.crc = original.crc
                         }
-                        if (nativeLib && entry.method == ZipEntry.STORED) {
-                            entry.extra = alignmentExtra(counting.count, name, 16_384)
+                        // Stored entries keep zipalign's alignment: native libraries on 16K pages, the
+                        // rest (resources.arsc above all) on 4 bytes. Android refuses targetSdk 30+ APKs
+                        // whose resources.arsc is unaligned — the installer then only says "not installed".
+                        if (entry.method == ZipEntry.STORED) {
+                            entry.extra = alignmentExtra(counting.count, name, if (nativeLib) 16_384 else 4)
                         }
                         zip.putNextEntry(entry)
                         if (data != null) zip.write(data) else archive.getInputStream(original).use { it.copyTo(zip) }
