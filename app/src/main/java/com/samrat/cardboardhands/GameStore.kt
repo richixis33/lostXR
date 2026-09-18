@@ -21,12 +21,17 @@ import java.net.URLEncoder
  *   vr_games/game.json                    a link: the APK lives elsewhere (GitHub Releases), so it
  *                                         may be larger than Supabase's 50 MB per file. Fields:
  *                                         {"name", "url", "icon"?, "description"?, "size"?}
+ *
+ * The same link files also work from the root of the PhoneXR GitHub repository (e.g. opensaber.json),
+ * so a game can be published without touching Supabase at all.
  */
 object GameStore {
     const val URL_BASE = "https://fjiostsfwfennbovpolc.supabase.co"
     /** Publishable key: made to ship inside apps, it only allows what storage policies permit. */
     private const val KEY = "sb_publishable_0we8-Uw_XxKmUINy6KOjDA_lySgpLiA"
     const val FOLDER = "vr_games"
+    /** GitHub repository whose root *.json link files are store games too. */
+    private const val GITHUB_REPO = "samrat1games/phonexr"
 
     /** Where "vr_games" may live: its own bucket, or a folder inside a common one. */
     private val locations = listOf(
@@ -61,8 +66,31 @@ object GameStore {
     private val iconNames = setOf("icon.png", "icon.jpg", "icon.jpeg", "icon.webp")
     @Volatile private var found: Location? = null
 
-    /** Network call, run off the main thread. */
+    /** Network call, run off the main thread. Supabase and GitHub each fill in what they can. */
     fun list(): List<Item> {
+        val github = runCatching { githubLinks() }.getOrDefault(emptyList())
+        val supabase = runCatching { supabaseItems() }
+        if (supabase.isFailure && github.isEmpty()) throw supabase.exceptionOrNull()!!
+        val items = supabase.getOrDefault(emptyList()) + github
+        return items.distinctBy { it.url ?: it.path }.sortedBy { it.title.lowercase() }
+    }
+
+    /** Link files (*.json with a "url") in the root of the PhoneXR GitHub repository. */
+    private fun githubLinks(): List<Item> {
+        val listing = openUrl("https://api.github.com/repos/$GITHUB_REPO/contents/").use {
+            JSONArray(it.inputStream.readBytes().toString(Charsets.UTF_8))
+        }
+        return (0 until listing.length()).map { listing.getJSONObject(it) }
+            .filter { it.optString("type") == "file" && it.getString("name").endsWith(".json") }
+            .mapNotNull { file ->
+                runCatching {
+                    val text = openUrl(file.getString("download_url")).use { it.inputStream.readBytes().toString(Charsets.UTF_8) }
+                    parseLink(text, "github:" + file.getString("name"), "", file.getString("name").substringBeforeLast('.'))
+                }.getOrNull()
+            }
+    }
+
+    private fun supabaseItems(): List<Item> {
         val location = found ?: locate()
         val items = mutableListOf<Item>()
         for (entry in listFolder(location.bucket, location.prefix)) {
@@ -101,14 +129,19 @@ object GameStore {
                 link(location.bucket, location.prefix + name, name.substringBeforeLast('.'))?.let { items += it }
             }
         }
-        return items.sortedBy { it.title.lowercase() }
+        return items
     }
 
     /** Reads a link file; broken ones are skipped so one typo does not empty the store. */
     private fun link(bucket: String, path: String, fallbackTitle: String): Item? = runCatching {
-        val json = JSONObject(open(bucket, path).use { it.inputStream.readBytes().toString(Charsets.UTF_8) })
-        val url = json.getString("url").takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return null
-        Item(
+        parseLink(open(bucket, path).use { it.inputStream.readBytes().toString(Charsets.UTF_8) }, path, bucket, fallbackTitle)
+    }.getOrNull()
+
+    /** A link file's JSON, or null when it is not a game link (no http(s) "url"). */
+    private fun parseLink(text: String, path: String, bucket: String, fallbackTitle: String): Item? {
+        val json = runCatching { JSONObject(text) }.getOrNull() ?: return null
+        val url = json.optString("url").takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return null
+        return Item(
             title = json.optString("name").ifBlank { fallbackTitle },
             path = path,
             bucket = bucket,
@@ -119,7 +152,7 @@ object GameStore {
             iconUrl = json.optString("icon").takeIf { it.startsWith("http") },
             descriptionText = json.optString("description").takeIf { it.isNotBlank() },
         )
-    }.getOrNull()
+    }
 
     /** Network call: a text file from the store folder, such as pwa.json. */
     fun readText(name: String): String {

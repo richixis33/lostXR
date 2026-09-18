@@ -512,7 +512,7 @@ class MainActivity : ComponentActivity() {
                 }
                 HigLink("Проверить гироскоп Joy‑Con") { start(GyroTestActivity::class.java) }
             }
-            HigSection(title = "Магазин", footer = "Игры берутся из папки «${GameStore.FOLDER}» в Supabase.") {
+            HigSection(title = "Магазин", footer = "Игры берутся из папки «${GameStore.FOLDER}» в Supabase и из файлов .json в корне репозитория PhoneXR на GitHub.") {
                 HigRow("Сервер", GameStore.URL_BASE.removePrefix("https://"))
             }
             HigSection {
