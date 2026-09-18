@@ -40,6 +40,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -68,6 +69,17 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     private lateinit var surfaceView: GLSurfaceView
     private lateinit var tracker: HeadTracker
     private val panel = HomePanel()
+    /** 6DoF with ARCore; null means rotation only (no ARCore, or 6DoF off in settings). */
+    @Volatile private var ar: ArTracker? = null
+    private var renderer: Renderer? = null
+    private val boundary by lazy { Boundary(this) }
+    /** Head position in the world (metres), from ARCore; stays zero in 3DoF. */
+    private val headPosition = FloatArray(3)
+    /** How the last hand-tracking frame lies on the eye's view (ARCore frames): left, top, width, height. */
+    @Volatile private var arFrameMap: FloatArray? = null
+    /** The latest ARCore camera frame, kept for "take a photo". */
+    @Volatile private var arPhoto: Bitmap? = null
+    @Volatile private var boundaryWarning = false
     private val keyboard = KeyboardPanel()
     private val keyboardRedraw = AtomicBoolean(true)
     @Volatile private var hoveredKey: String? = null
@@ -162,10 +174,11 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         tracker = HeadTracker(getSystemService(SensorManager::class.java)) { display }
         surfaceView = GLSurfaceView(this).apply {
             setEGLContextClientVersion(2)
-            setRenderer(Renderer())
-            setOnClickListener { tracker.recenter() }
+            setRenderer(Renderer().also { renderer = it })
+            setOnClickListener { recenter() }
         }
         setContentView(surfaceView)
+        if (Settings.load(this).sixDof && ArTracker.availability(this) == ArTracker.Availability.READY) ar = ArTracker.create(this)
         trackingExecutor.execute {
             handTracker = runCatching { HandTracker(this, useGpu = true, onResult = ::onHands) }
                 .getOrElse { HandTracker(this, useGpu = false, onResult = ::onHands) }
@@ -176,10 +189,15 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         super.onResume()
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
         stopService(Intent(this, HandTrackingService::class.java))
+        // ARCore owns the camera in 6DoF; if it cannot start, CameraX gives 3DoF passthrough.
+        if (ar?.resume() == false) { ar?.close(); ar = null; toast("6DoF недоступен: работает 3DoF") }
         surfaceView.onResume()
         tracker.start()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) bindCamera()
-        else toast("Разрешите PhoneXR доступ к камере")
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) toast("Разрешите PhoneXR доступ к камере")
+        else if (ar == null) {
+            bindCamera()
+            if (Settings.load(this).sixDof) startArLater()
+        }
         joyConReceiver = JoyConBridge.listen(this) { onJoyCon(it) }
         JoyConBridge.watch(this, watching = true, learning = false)
         CinemaActivity.setJoyConPassthrough(this, false)
@@ -190,6 +208,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         super.onPause()
         lifecycleRegistry.currentState = Lifecycle.State.STARTED
         surfaceView.onPause()
+        ar?.pause()
         tracker.stop()
         cameraProvider?.unbindAll()
         JoyConBridge.watch(this, watching = false, learning = false)
@@ -200,10 +219,81 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     override fun onDestroy() {
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         windows.forEach { it.content.release() }
+        ar?.close()
         cameraExecutor.shutdownNow()
         trackingExecutor.execute { handTracker?.close() }
         trackingExecutor.shutdown()
         super.onDestroy()
+    }
+
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * ARCore may still be checking when the home opens: ask again for a few seconds, then move the
+     * camera from CameraX (3DoF) to ARCore (6DoF) on the fly.
+     */
+    private fun startArLater(attempt: Int = 0) {
+        if (ar != null || isFinishing || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        when (ArTracker.availability(this)) {
+            ArTracker.Availability.CHECKING -> if (attempt < 40) handler.postDelayed({ startArLater(attempt + 1) }, 250)
+            ArTracker.Availability.MISSING -> Unit
+            ArTracker.Availability.READY -> {
+                cameraProvider?.unbindAll()
+                val created = ArTracker.create(this)
+                if (created == null || !created.resume()) {
+                    created?.close()
+                    bindCamera()
+                    return
+                }
+                glTasks += { renderer?.attachAr(created) }
+                ar = created
+                toast("6DoF включён: можно ходить по комнате")
+            }
+        }
+    }
+
+    /** "Straight ahead" and "here" become the current head direction and spot. */
+    private fun recenter() {
+        tracker.recenter()
+        ar?.recenter()
+    }
+
+    private val settingsHost = object : SettingsContent.Host {
+        override fun trackingText(): String {
+            val tracker = ar
+            return when {
+                tracker == null && !Settings.load(this@VrHomeActivity).sixDof -> "3DoF · 6DoF выключен в настройках"
+                tracker == null -> "3DoF · нет ARCore (Google Play Services for AR)"
+                tracker.tracking -> "6DoF · ARCore, комната отслеживается"
+                else -> "6DoF · ARCore ищет комнату…"
+            }
+        }
+
+        override fun showPersona() = runOnUiThread {
+            if (!Persona.exists(this@VrHomeActivity)) toast("Сначала добавьте лицо")
+            else openWindow("persona", "Лицо", ID_PERSONA) { PersonaContent(this@VrHomeActivity) }
+        }
+
+        override fun startBoundary() = runOnUiThread { startBoundaryTracing() }
+
+        override fun clearBoundary() {
+            boundary.clear()
+            toast("Граница удалена")
+        }
+
+        override fun boundaryText(): String = when {
+            ar == null -> "Нужен 6DoF (ARCore): без него граница не работает"
+            boundary.defined -> "Граница задана"
+            else -> "Граница не задана"
+        }
+    }
+
+    private fun startBoundaryTracing() {
+        if (ar == null) return toast("Граница работает только в 6DoF (нужен ARCore)")
+        windows.firstOrNull { it.id == "settings" }?.let { minimize(it) }
+        switchMode(HomePanel.Mode.HOME)
+        boundary.startTracing()
+        toast("Обойдите край свободного места. Круг замкнётся сам, щипок — готово")
     }
 
     // ------------------------------------------------------------------ Apps and windows
@@ -217,6 +307,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             val own = listOf(
                 HomePanel.Entry(ID_BROWSER, "Браузер", drawBrowserIcon()),
                 HomePanel.Entry(ID_PHOTOS, "Фото", drawPhotosIcon()),
+                HomePanel.Entry(ID_SETTINGS, "Настройки", symbolIcon("⚙", Color.rgb(142, 142, 147))),
                 HomePanel.Entry(ID_STORE, "Магазин", drawStoreIcon()),
             )
             val vr = found.map {
@@ -250,6 +341,8 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         when {
             id == ID_BROWSER -> openWindow("browser", "Браузер", ID_BROWSER) { BrowserContent(BrowserContent.HOME, ::openWebXr) }
             id == ID_PHOTOS -> openWindow("photos", "Фото", ID_PHOTOS) { PhotosContent(this) }
+            id == ID_SETTINGS -> openWindow("settings", "Настройки", ID_SETTINGS) { SettingsContent(this, settingsHost) }
+            id == MENU_BOUNDARY -> startBoundaryTracing()
             id == ID_MINECRAFT -> {
                 if (runCatching { packageManager.getApplicationInfo(MINECRAFT, 0) }.isFailure) {
                     toast("Установите Minecraft из Google Play")
@@ -272,7 +365,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                 }
             }
             id == MENU_PHOTO -> takePhoto()
-            id == MENU_RECENTER -> { tracker.recenter(); switchMode(HomePanel.Mode.HOME) }
+            id == MENU_RECENTER -> { recenter(); switchMode(HomePanel.Mode.HOME) }
             id == MENU_HOME -> switchMode(HomePanel.Mode.HOME)
             id == MENU_EXIT -> {
                 startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
@@ -352,7 +445,8 @@ class VrHomeActivity : Activity(), LifecycleOwner {
 
     /** Real photo: the current passthrough frame goes to the gallery (Pictures/PhoneXR). */
     private fun takePhoto() {
-        val bitmap = synchronized(frameLock) { frame?.takeIf { !it.isRecycled }?.copy(Bitmap.Config.ARGB_8888, false) }
+        val bitmap = arPhoto?.takeIf { !it.isRecycled }?.let { runCatching { it.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() }
+            ?: synchronized(frameLock) { frame?.takeIf { !it.isRecycled }?.copy(Bitmap.Config.ARGB_8888, false) }
             ?: return toast("Камера ещё не готова")
         switchMode(HomePanel.Mode.HOME)
         thread(name = "PhoneXR photo") {
@@ -388,6 +482,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             HomePanel.Entry(MENU_HOME, "Главная", symbolIcon("⌂", Color.rgb(90, 90, 100))),
             HomePanel.Entry(MENU_PHOTO, "Снять фото", symbolIcon("◉", Color.rgb(255, 159, 10))),
             HomePanel.Entry(MENU_RECENTER, "Выровнять", symbolIcon("◎", Color.rgb(48, 176, 199))),
+            HomePanel.Entry(MENU_BOUNDARY, "Граница", symbolIcon("⬡", Color.rgb(90, 200, 250))),
             HomePanel.Entry(MENU_EXIT, "Выйти из VR", symbolIcon("✕", Color.rgb(255, 69, 58))),
         )
         synchronized(panel) { panel.setMenu(entries) }
@@ -449,10 +544,16 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         val now = SystemClock.elapsedRealtimeNanos()
         // The camera frame this result belongs to: the head is looked up for that moment.
         val frameNs = result.timestampMs() * 1_000_000L
-        handPoints = result.landmarks().filter { it.size >= 21 }.map { points ->
+        // ARCore frames: landmarks are on the upright camera image; place them on the eye's view.
+        val map = arFrameMap
+        val landmarks = result.landmarks().map { points ->
+            if (map == null) points
+            else points.map { NormalizedLandmark.create(map[0] + it.x() * map[2], map[1] + it.y() * map[3], it.z()) }
+        }
+        handPoints = landmarks.filter { it.size >= 21 }.map { points ->
             FloatArray(63) { i -> when (i % 3) { 0 -> points[i / 3].x(); 1 -> points[i / 3].y(); else -> points[i / 3].z() } }
         }
-        val hands = result.landmarks().mapIndexedNotNull { index, points ->
+        val hands = landmarks.mapIndexedNotNull { index, points ->
             if (points.size < 21) return@mapIndexedNotNull null
             val physicalLeft = result.handednesses().getOrNull(index)?.firstOrNull()?.categoryName().equals("Right", true)
             physicalLeft to HandGestures.shape(points, physicalLeft)
@@ -491,6 +592,8 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             wasPinching = true
             if (hand.palmToFace) {
                 runOnUiThread { if (panel.mode == HomePanel.Mode.MENU) switchMode(HomePanel.Mode.HOME) else openMenu() }
+            } else if (boundary.tracing != null) {
+                if (boundary.finish()) toast("Граница сохранена") else toast("Граница слишком маленькая — обойдите комнату")
             } else {
                 press(target, direction)
             }
@@ -576,9 +679,14 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         Matrix.setRotateM(rotate, 0, -yaw, 0f, 1f, 0f)
         val d = FloatArray(4)
         Matrix.multiplyMV(d, 0, rotate, 0, direction, 0)
+        // In 6DoF the ray starts where the head is now, not at the centre of the room.
+        val origin = synchronized(headPosition) { floatArrayOf(headPosition[0], headPosition[1], headPosition[2], 1f) }
+        val o = FloatArray(4)
+        Matrix.multiplyMV(o, 0, rotate, 0, origin, 0)
         if (d[2] >= -1e-3f) return null
-        val t = -radius / d[2]
-        return floatArrayOf(d[0] * t, d[1] * t)
+        val t = (-radius - o[2]) / d[2]
+        if (t <= 0f) return null
+        return floatArrayOf(o[0] + d[0] * t, o[1] + d[1] * t)
     }
 
     private fun updateHit(target: Hit?) {
@@ -825,6 +933,10 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         private var cameraTexture = 0
         private var controlsTexture = 0
         private var keyboardTexture = 0
+        /** ARCore draws the camera into this external texture (6DoF passthrough). */
+        private var arTexture = 0
+        private var warningTexture = 0
+        private var tracingTexture = 0
         private var textureProgram = 0
         private var externalProgram = 0
         private var colorProgram = 0
@@ -870,16 +982,82 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
             keyboardRedraw.set(true)
+            arTexture = IntArray(1).also { GLES20.glGenTextures(1, it, 0) }[0]
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, arTexture)
+            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            ar?.attachTexture(arTexture)
+            warningTexture = bannerTexture("Вы вышли за границу — вернитесь назад", Color.rgb(255, 69, 58))
+            tracingTexture = bannerTexture("Обойдите край свободного места · щипок — готово", Color.rgb(10, 132, 255))
             redraw.set(true)
+        }
+
+        private fun bannerTexture(text: String, color: Int): Int {
+            val bitmap = Bitmap.createBitmap(1400, 180, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            paint.color = Color.argb(225, 28, 28, 32)
+            canvas.drawRoundRect(RectF(0f, 0f, 1400f, 180f), 90f, 90f, paint)
+            paint.color = color
+            canvas.drawCircle(95f, 90f, 34f, paint)
+            paint.color = Color.WHITE
+            paint.textSize = 54f
+            canvas.drawText(text, 160f, 108f, paint)
+            val id = IntArray(1).also { GLES20.glGenTextures(1, it, 0) }[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, id)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+            bitmap.recycle()
+            return id
+        }
+
+        /** ARCore started after the GL surface: give it the camera texture and the eye size. */
+        fun attachAr(tracker6: ArTracker) {
+            tracker6.attachTexture(arTexture)
+            @Suppress("DEPRECATION")
+            tracker6.setDisplay(windowManager.defaultDisplay.rotation, width / 2, height)
         }
 
         override fun onSurfaceChanged(unused: GL10?, w: Int, h: Int) {
             width = w
             height = h
+            @Suppress("DEPRECATION")
+            ar?.setDisplay(windowManager.defaultDisplay.rotation, w / 2, h)
+        }
+
+        /** 6DoF: one ARCore step — head position, and a camera frame for the hands when they are free. */
+        private fun updateAr(tracker6: ArTracker) {
+            tracker.copyHead(head)
+            val job = tracker6.update(head, wantImage = !busy.get())
+            if (job != null && busy.compareAndSet(false, true)) {
+                trackingExecutor.execute {
+                    try {
+                        val frame = job()
+                        if (frame != null) {
+                            arFrameMap = floatArrayOf(frame.viewLeft, frame.viewTop, frame.viewWidth, frame.viewHeight)
+                            handTracker?.detect(frame.bitmap, frame.timestampNs / 1_000_000L)
+                            val old = arPhoto
+                            arPhoto = frame.bitmap
+                            old?.recycle()
+                        }
+                    } catch (error: Throwable) {
+                        Log.w(TAG, "ARCore frame failed", error)
+                    } finally {
+                        busy.set(false)
+                    }
+                }
+            }
+            synchronized(headPosition) { synchronized(tracker6.position) { System.arraycopy(tracker6.position, 0, headPosition, 0, 3) } }
+            if (boundary.tracing != null && tracker6.tracking && boundary.addPoint(headPosition[0], headPosition[2])) {
+                toast("Граница сохранена")
+            }
         }
 
         override fun onDrawFrame(unused: GL10?) {
             while (true) glTasks.poll()?.invoke() ?: break
+            val tracker6 = ar
+            if (tracker6 != null) updateAr(tracker6)
             if (redraw.getAndSet(false)) {
                 synchronized(panel) {
                     panel.draw(hoveredPanel, pressing)
@@ -917,13 +1095,21 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             tracker.copyHead(head)
             Matrix.transposeM(worldToHead, 0, head, 0)
+            // 6DoF: the world moves opposite to the head.
+            val position = synchronized(headPosition) { headPosition.copyOf() }
+            Matrix.translateM(worldToHead, 0, -position[0], -position[1], -position[2])
             val eyeWidth = width / 2
-            Matrix.perspectiveM(projection, 0, 90f, eyeWidth.toFloat() / height, .05f, 100f)
+            if (tracker6 != null) synchronized(tracker6.projection) { System.arraycopy(tracker6.projection, 0, projection, 0, 16) }
+            else Matrix.perspectiveM(projection, 0, 90f, eyeWidth.toFloat() / height, .05f, 100f)
             GLES20.glEnable(GLES20.GL_BLEND)
             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
             val eyeAspect = eyeWidth.toFloat() / height
             // Keep the pointer mapping in step with how the camera image is laid out below.
-            if (eyeAspect < cameraAspect) {
+            if (tracker6 != null) {
+                // ARCore landmarks are already placed on the eye's view; its projection sets the angles.
+                viewScaleX = 1f / projection[0]
+                viewScaleY = 1f / projection[5]
+            } else if (eyeAspect < cameraAspect) {
                 viewScaleX = cameraAspect
                 viewScaleY = 1f
             } else {
@@ -933,7 +1119,13 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             for (index in 0..1) {
                 GLES20.glViewport(index * eyeWidth, 0, eyeWidth, height)
                 // Passthrough fills each eye; the camera image is cropped to the eye's shape.
-                if (hasCamera) {
+                if (tracker6 != null && tracker6.hasUv) {
+                    val uv = FloatArray(8)
+                    synchronized(tracker6.passthroughUv) { tracker6.passthroughUv.position(0); tracker6.passthroughUv.get(uv); tracker6.passthroughUv.position(0) }
+                    quad(externalProgram, arTexture, identity, floatArrayOf(
+                        -1f, -1f, 0f, uv[0], uv[1], 1f, -1f, 0f, uv[2], uv[3], -1f, 1f, 0f, uv[4], uv[5], 1f, 1f, 0f, uv[6], uv[7]
+                    ), external = true)
+                } else if (hasCamera) {
                     val (u0, u1, v0, v1) = if (eyeAspect < cameraAspect) {
                         val span = eyeAspect / cameraAspect
                         listOf(.5f - span / 2, .5f + span / 2, 0f, 1f)
@@ -994,6 +1186,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                     val kz = -KEYBOARD_RADIUS
                     quad(textureProgram, keyboardTexture, mvp, floatArrayOf(-kw, ky - kh, kz, 0f, 1f, kw, ky - kh, kz, 1f, 1f, -kw, ky + kh, kz, 0f, 0f, kw, ky + kh, kz, 1f, 0f))
                 }
+                drawBoundary(position)
                 hand()
             }
             GLES20.glDisable(GLES20.GL_BLEND)
@@ -1110,6 +1303,82 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             disc(x, y, r, position)
         }
 
+        /**
+         * The play-area boundary: while tracing, the path walked so far; afterwards blue walls that
+         * fade in near the edge, and a warning in front of the eyes once outside.
+         */
+        private fun drawBoundary(position: FloatArray) {
+            if (ar == null) return
+            val tracing = boundary.tracing
+            val outline = boundary.outline
+            if (tracing == null && outline.size < 6) return
+            Matrix.multiplyMM(mvp, 0, projection, 0, view, 0)
+            GLES20.glUseProgram(colorProgram)
+            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(colorProgram, "uMvp"), 1, false, mvp, 0)
+            val location = GLES20.glGetAttribLocation(colorProgram, "aPosition")
+            val floor = Boundary.WALL_BOTTOM + .2f
+            if (tracing != null) {
+                val line = FloatArray(tracing.size / 2 * 3) { i -> when (i % 3) { 0 -> tracing[i / 3 * 2]; 1 -> floor; else -> tracing[i / 3 * 2 + 1] } }
+                GLES20.glUniform4f(GLES20.glGetUniformLocation(colorProgram, "uColor"), .35f, .78f, 1f, .95f)
+                GLES20.glLineWidth(10f)
+                drawArray(line, GLES20.GL_LINE_STRIP, location)
+                banner(tracingTexture, .78f)
+                return
+            }
+            val inside = boundary.contains(position[0], position[2])
+            val distance = boundary.distance(position[0], position[2])
+            boundaryWarning = !inside
+            val strength = if (!inside) 1f else ((Boundary.WARN_DISTANCE - distance) / Boundary.WARN_DISTANCE).coerceIn(0f, 1f)
+            if (strength <= 0f) return
+            val walls = ArrayList<Float>()
+            val grid = ArrayList<Float>()
+            var j = outline.size - 2
+            var i = 0
+            while (i < outline.size) {
+                val ax = outline[j]; val az = outline[j + 1]; val bx = outline[i]; val bz = outline[i + 1]
+                val bottom = Boundary.WALL_BOTTOM; val top = Boundary.WALL_TOP
+                walls += listOf(ax, bottom, az, bx, bottom, bz, bx, top, bz, ax, bottom, az, bx, top, bz, ax, top, az)
+                // A grid on the wall: vertical lines every 25 cm, horizontal every 30 cm.
+                val length = hypot(bx - ax, bz - az)
+                val steps = (length / .25f).toInt().coerceAtLeast(1)
+                for (k in 0..steps) {
+                    val t = k.toFloat() / steps
+                    val x = ax + (bx - ax) * t; val z = az + (bz - az) * t
+                    grid += listOf(x, bottom, z, x, top, z)
+                }
+                var y = bottom
+                while (y <= top) {
+                    grid += listOf(ax, y, az, bx, y, bz)
+                    y += .3f
+                }
+                j = i
+                i += 2
+            }
+            GLES20.glUniform4f(GLES20.glGetUniformLocation(colorProgram, "uColor"), .2f, .55f, 1f, .18f * strength)
+            drawArray(walls.toFloatArray(), GLES20.GL_TRIANGLES, location)
+            GLES20.glUniform4f(GLES20.glGetUniformLocation(colorProgram, "uColor"), .45f, .8f, 1f, .75f * strength)
+            GLES20.glLineWidth(3f)
+            drawArray(grid.toFloatArray(), GLES20.GL_LINES, location)
+            if (!inside) banner(warningTexture, 0f)
+        }
+
+        /** A message fixed in front of the eyes at height [y] (head space, tangent units). */
+        private fun banner(texture: Int, y: Float) {
+            val head = FloatArray(16)
+            Matrix.multiplyMM(head, 0, projection, 0, eye, 0)
+            val w = .62f; val h = w * 180f / 1400f
+            quad(textureProgram, texture, head, floatArrayOf(-w, y - h, -1f, 0f, 1f, w, y - h, -1f, 1f, 1f, -w, y + h, -1f, 0f, 0f, w, y + h, -1f, 1f, 0f))
+        }
+
+        private fun drawArray(data: FloatArray, mode: Int, location: Int) {
+            if (data.isEmpty()) return
+            val buffer = ByteBuffer.allocateDirect(data.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(data)
+            buffer.position(0)
+            GLES20.glVertexAttribPointer(location, 3, GLES20.GL_FLOAT, false, 12, buffer)
+            GLES20.glEnableVertexAttribArray(location)
+            GLES20.glDrawArrays(mode, 0, data.size / 3)
+        }
+
         private fun disc(x: Float, y: Float, r: Float, position: Int) {
             val data = FloatArray(3 * 18) { i ->
                 val k = i / 3
@@ -1190,6 +1459,9 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         private const val MENU_HOME = "menu:home"
         private const val MENU_EXIT = "menu:exit"
         private const val MENU_PHOTO = "menu:photo"
+        private const val MENU_BOUNDARY = "menu:boundary"
+        private const val ID_SETTINGS = "own:settings"
+        private const val ID_PERSONA = "own:persona"
         private const val KEYBOARD_W = 1.7f
         private val KEYBOARD_H = KEYBOARD_W * KeyboardPanel.HEIGHT / KeyboardPanel.WIDTH
         private const val KEYBOARD_RADIUS = 1.15f

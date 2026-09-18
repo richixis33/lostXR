@@ -68,6 +68,10 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$cameraX")
 
     implementation("com.google.mediapipe:tasks-vision:0.10.35")
+    // Speech vs. other sounds for the face's mouth (YAMNet audio classifier).
+    implementation("com.google.mediapipe:tasks-audio:0.10.35")
+    // 6DoF in the VR home: ARCore tracks where the headset is in the room.
+    implementation("com.google.ar:core:1.47.0")
     implementation("com.android.tools.build:apksig:8.7.3")
     implementation("com.google.android.material:material:1.12.0")
     // ArUco markers on the Joy-Con for camera tracking.
