@@ -174,6 +174,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         lifecycleRegistry.currentState = Lifecycle.State.CREATED
+        L10n.init(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
@@ -290,7 +291,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         if (requestCode == REQUEST_PERSONA) onboarding?.personaDone()
     }
 
-    private fun openCalls() = runOnUiThread { openWindow("calls", "Звонки", ID_CALLS) { CallContent(this) } }
+    private fun openCalls() = runOnUiThread { openWindow("calls", tr("Звонки"), ID_CALLS) { CallContent(this) } }
 
     /** An incoming call brings the Calls window up wherever the user is. */
     private val callListener: () -> Unit = {
@@ -341,7 +342,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
 
         override fun showPersona() = runOnUiThread {
             if (!Persona.exists(this@VrHomeActivity)) toast("Сначала добавьте лицо")
-            else openWindow("persona", "Лицо", ID_PERSONA) { PersonaContent(this@VrHomeActivity) }
+            else openWindow("persona", tr("Лицо"), ID_PERSONA) { PersonaContent(this@VrHomeActivity) }
         }
 
         override fun startBoundary() = runOnUiThread { startBoundaryTracing() }
@@ -374,15 +375,19 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                 .filter { it.kind != GameLibrary.Kind.GEAR_VR_ORIGINAL && it.kind != GameLibrary.Kind.GEAR_VR_UNSUPPORTED }
             games = found.associateBy { it.packageName }
             // Minecraft stays in the PhoneXR app (PXR Bedrock), not on the MR home screen.
+            // iOS 27 icons (light or dark, chosen with a long pinch on the home) where the pack has one.
+            fun own(id: String, drawn: () -> Drawable) = IconPack.OWN[id]?.let { IconPack.icon(this, it) } ?: drawn()
             val own = listOf(
-                HomePanel.Entry(ID_BROWSER, "Браузер", drawBrowserIcon()),
-                HomePanel.Entry(ID_PHOTOS, "Фото", drawPhotosIcon()),
-                HomePanel.Entry(ID_SETTINGS, "Настройки", symbolIcon("⚙", Color.rgb(142, 142, 147))),
-                HomePanel.Entry(ID_STORE, "Магазин", drawStoreIcon()),
-                HomePanel.Entry(ID_CALLS, "Звонки", symbolIcon("✆", Color.rgb(48, 209, 88))),
-            ) + if (AndroidAppsContent.enabled(this)) listOf(HomePanel.Entry(ID_ANDROID, "Android", symbolIcon("▦", Color.rgb(61, 220, 132)))) else emptyList()
+                HomePanel.Entry(ID_BROWSER, tr("Браузер"), own(ID_BROWSER) { drawBrowserIcon() }),
+                HomePanel.Entry(ID_PHOTOS, tr("Фото"), own(ID_PHOTOS) { drawPhotosIcon() }),
+                HomePanel.Entry(ID_SETTINGS, tr("Настройки"), own(ID_SETTINGS) { symbolIcon("⚙", Color.rgb(142, 142, 147)) }),
+                HomePanel.Entry(ID_STORE, tr("Магазин"), own(ID_STORE) { drawStoreIcon() }),
+                HomePanel.Entry(ID_CALLS, tr("Звонки"), own(ID_CALLS) { symbolIcon("✆", Color.rgb(48, 209, 88)) }),
+                HomePanel.Entry(ID_ELIX, "Elix", drawElixIcon()),
+            ) + if (AndroidAppsContent.enabled(this)) listOf(HomePanel.Entry(ID_ANDROID, "Android", own(ID_ANDROID) { symbolIcon("▦", Color.rgb(61, 220, 132)) })) else emptyList()
             val vr = found.map {
-                HomePanel.Entry("app:${it.packageName}", it.label, runCatching { packageManager.getApplicationIcon(it.packageName) }.getOrNull())
+                HomePanel.Entry("app:${it.packageName}", it.label,
+                    IconPack.icon(this, it.packageName) ?: runCatching { packageManager.getApplicationIcon(it.packageName) }.getOrNull())
             }
             val web = WebApps.installed(this).map { app ->
                 HomePanel.Entry("web:${app.url}", app.name, WebApps.icon(app)?.let { BitmapDrawable(resources, it) } ?: letterIcon(app.name))
@@ -410,10 +415,10 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     private fun openEntry(entry: HomePanel.Entry) {
         val id = entry.id
         when {
-            id == ID_BROWSER -> openWindow("browser", "Браузер", ID_BROWSER) { BrowserContent(BrowserContent.HOME, ::openWebXr) }
-            id == ID_PHOTOS -> openWindow("photos", "Фото", ID_PHOTOS) { PhotosContent(this) }
-            id == ID_SETTINGS -> openWindow("settings", "Настройки", ID_SETTINGS) { SettingsContent(this, settingsHost) }
-            id == ID_ANDROID -> openWindow("android", "Android‑приложения", ID_ANDROID) {
+            id == ID_BROWSER -> openWindow("browser", tr("Браузер"), ID_BROWSER) { BrowserContent(BrowserContent.HOME, ::openWebXr) }
+            id == ID_PHOTOS -> openWindow("photos", tr("Фото"), ID_PHOTOS) { PhotosContent(this) }
+            id == ID_SETTINGS -> openWindow("settings", tr("Настройки"), ID_SETTINGS) { SettingsContent(this, settingsHost) }
+            id == ID_ANDROID -> openWindow("android", tr("Android‑приложения"), ID_ANDROID) {
                 AndroidAppsContent(this) { name, label ->
                     runOnUiThread {
                         if (VirtualScreen.access() != VirtualScreen.Access.READY) toast("Запустите Shizuku и разрешите доступ PhoneXR")
@@ -429,8 +434,9 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                     openWindow("minecraft", "Minecraft", ID_MINECRAFT) { ShizukuAppContent(MINECRAFT) { toast(it) } }
                 }
             }
-            id == ID_STORE -> openWindow("store", "Магазин", ID_STORE) { StoreContent(this, storeHost) }
+            id == ID_STORE -> openWindow("store", tr("Магазин"), ID_STORE) { StoreContent(this, storeHost) }
             id == ID_CALLS -> openCalls()
+            id == ID_ELIX -> openWindow("elix", "Elix", ID_ELIX) { ElixContent(this) }
             id.startsWith("app:") -> launchGame(id.removePrefix("app:"))
             id.startsWith("web:") -> id.removePrefix("web:").let { url -> openWindow("web:$url", entry.label, id) { BrowserContent(url, ::openWebXr) } }
             id.startsWith("dock:") -> windows.firstOrNull { it.id == id.removePrefix("dock:") }?.let { restore(it) }
@@ -559,11 +565,12 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             recent.take(3).mapNotNull { name ->
                 games[name]?.let { HomePanel.Entry("app:$name", it.label, runCatching { packageManager.getApplicationIcon(name) }.getOrNull()) }
             } + listOf(
-            HomePanel.Entry(MENU_HOME, "Главная", symbolIcon("⌂", Color.rgb(90, 90, 100))),
-            HomePanel.Entry(MENU_PHOTO, "Снять фото", symbolIcon("◉", Color.rgb(255, 159, 10))),
-            HomePanel.Entry(MENU_RECENTER, "Выровнять", symbolIcon("◎", Color.rgb(48, 176, 199))),
-            HomePanel.Entry(MENU_BOUNDARY, "Граница", symbolIcon("⬡", Color.rgb(90, 200, 250))),
-            HomePanel.Entry(MENU_EXIT, "Выйти из VR", symbolIcon("✕", Color.rgb(255, 69, 58))),
+            HomePanel.Entry(MENU_HOME, tr("Главная"), symbolIcon("⌂", Color.rgb(90, 90, 100))),
+            HomePanel.Entry(ID_ELIX, "Elix", drawElixIcon()),
+            HomePanel.Entry(MENU_PHOTO, tr("Снять фото"), symbolIcon("◉", Color.rgb(255, 159, 10))),
+            HomePanel.Entry(MENU_RECENTER, tr("Выровнять"), symbolIcon("◎", Color.rgb(48, 176, 199))),
+            HomePanel.Entry(MENU_BOUNDARY, tr("Граница"), symbolIcon("⬡", Color.rgb(90, 200, 250))),
+            HomePanel.Entry(MENU_EXIT, tr("Выйти из VR"), symbolIcon("✕", Color.rgb(255, 69, 58))),
         )
         synchronized(panel) { panel.setMenu(entries) }
         switchMode(HomePanel.Mode.MENU)
@@ -679,6 +686,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                 press(target, direction)
             }
         } else if (pinching) {
+            checkLongPress()
             dragOrMove(direction)
         } else if (wasPinching) {
             wasPinching = false
@@ -691,6 +699,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         val buttons = snapshot.left.buttons or snapshot.right.buttons
         val down = buttons and (JoyConButtons.TRIGGER or JoyConButtons.PRIMARY) != 0
         if (down && !joyConDown) press(hit, ray)
+        if (down) checkLongPress()
         if (!down && joyConDown) release()
         joyConDown = down
         if (buttons and JoyConButtons.MENU != 0) openMenu()
@@ -801,14 +810,15 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         when (target) {
             is Hit.Setup -> onboarding?.press(target.u, target.v)
             is Hit.Panel -> {
-                val item = synchronized(panel) { panel.hit(target.u, target.v) } ?: return
-                runOnUiThread {
-                    when (item) {
-                        is HomePanel.Target.App -> openEntry(item.entry)
-                        is HomePanel.Target.Page -> synchronized(panel) { panel.showPage(item.index) }
-                    }
-                    redraw.set(true)
+                val item = synchronized(panel) { panel.hit(target.u, target.v) }
+                // Home icons open when the pinch lets go; holding it opens "Customize" instead.
+                if (panel.mode == HomePanel.Mode.HOME) {
+                    panelPress = item
+                    panelPressAt = SystemClock.elapsedRealtime()
+                    return
                 }
+                item ?: return
+                runOnUiThread { panelAction(item); redraw.set(true) }
             }
             is Hit.Content -> {
                 focused = target.window
@@ -889,10 +899,55 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         pressed.window.content.touch(MotionEvent.ACTION_MOVE, u, v)
     }
 
+    private fun panelAction(item: HomePanel.Target) {
+        when (item) {
+            is HomePanel.Target.App -> openEntry(item.entry)
+            is HomePanel.Target.Page -> synchronized(panel) { panel.showPage(item.index) }
+            is HomePanel.Target.Theme -> {
+                IconPack.setTheme(this, if (item.dark) IconPack.Theme.DARK else IconPack.Theme.LIGHT)
+                openCustomize()
+                loadApps()
+            }
+            HomePanel.Target.Close -> switchMode(HomePanel.Mode.HOME)
+        }
+    }
+
+    /** A pinch held on the home: pick light or dark icons, like iOS "Customize". */
+    private fun openCustomize() {
+        synchronized(panel) {
+            panel.setCustomize(
+                IconPack.icon(this, "com.miui.weather2", IconPack.Theme.LIGHT),
+                IconPack.icon(this, "com.miui.weather2", IconPack.Theme.DARK),
+                IconPack.theme(this) == IconPack.Theme.DARK,
+            )
+            panel.mode = HomePanel.Mode.CUSTOMIZE
+        }
+        redraw.set(true)
+    }
+
+    @Volatile private var panelPress: HomePanel.Target? = null
+    @Volatile private var panelPressAt = 0L
+
+    /** While pinching on the home: long enough opens "Customize". */
+    private fun checkLongPress() {
+        if (!pressing || panelPressAt == 0L) return
+        if (SystemClock.elapsedRealtime() - panelPressAt > LONG_PRESS_MS) {
+            panelPressAt = 0L
+            panelPress = null
+            runOnUiThread { openCustomize() }
+        }
+    }
+
     private fun release() {
         if (!pressing) return
         pressing = false
         drag = null
+        if (panelPressAt != 0L) {
+            val item = panelPress
+            panelPressAt = 0L
+            panelPress = null
+            if (item != null) runOnUiThread { panelAction(item); redraw.set(true) }
+        }
         val pressed = pressedHit as? Hit.Content
         if (pressed != null) {
             val current = hit as? Hit.Content
@@ -957,6 +1012,23 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         canvas.drawPath(Path().apply { moveTo(c + size * .2f, c - size * .2f); lineTo(c - size * .05f, c - size * .05f); lineTo(c + size * .05f, c + size * .05f); close() }, paint)
         paint.color = Color.WHITE
         canvas.drawPath(Path().apply { moveTo(c - size * .2f, c + size * .2f); lineTo(c - size * .05f, c - size * .05f); lineTo(c + size * .05f, c + size * .05f); close() }, paint)
+    }
+
+    /** Elix: a glowing orb in Siri-like colours. */
+    private fun drawElixIcon(): Drawable = iconCanvas { canvas, size ->
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        canvas.drawColor(Color.rgb(10, 10, 16))
+        val colors = intArrayOf(Color.rgb(255, 64, 160), Color.rgb(120, 90, 255), Color.rgb(40, 200, 255), Color.rgb(255, 150, 60))
+        colors.forEachIndexed { i, color ->
+            val angle = i * Math.PI / 2
+            paint.shader = android.graphics.RadialGradient(
+                size / 2 + (Math.cos(angle) * size * .12).toFloat(), size / 2 + (Math.sin(angle) * size * .12).toFloat(), size * .3f,
+                color, Color.TRANSPARENT, Shader.TileMode.CLAMP
+            )
+            canvas.drawCircle(size / 2, size / 2, size * .42f, paint)
+        }
+        paint.shader = android.graphics.RadialGradient(size / 2, size / 2, size * .16f, Color.WHITE, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+        canvas.drawCircle(size / 2, size / 2, size * .2f, paint)
     }
 
     private fun drawStoreIcon(): Drawable = iconCanvas { canvas, size ->
@@ -1579,6 +1651,8 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         private const val ID_SETTINGS = "own:settings"
         private const val ID_ANDROID = "own:android"
         private const val ID_CALLS = "own:calls"
+        private const val ID_ELIX = "own:elix"
+        private const val LONG_PRESS_MS = 700L
         private const val ID_PERSONA = "own:persona"
         private const val KEYBOARD_W = 1.7f
         private val KEYBOARD_H = KEYBOARD_W * KeyboardPanel.HEIGHT / KeyboardPanel.WIDTH

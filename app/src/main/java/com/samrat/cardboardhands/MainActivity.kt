@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -49,6 +52,7 @@ import zone.ien.hig.icons.CupertinoIcons
 import zone.ien.hig.icons.filled.Cart
 import zone.ien.hig.icons.filled.Gearshape
 import zone.ien.hig.icons.filled.House
+import zone.ien.hig.icons.filled.Person
 import zone.ien.hig.section.SectionLink
 import zone.ien.hig.section.SectionScope
 import zone.ien.hig.theme.CupertinoTheme
@@ -76,6 +80,111 @@ class MainActivity : ComponentActivity() {
 
     private var storeItems by mutableStateOf<List<GameStore.Item>?>(null)
     private var androidApps by mutableStateOf(false)
+    private var languagePicker by mutableStateOf(false)
+
+    // ---------------------------------------------------------------- Friends
+    private var friendsProfile by mutableStateOf<Friends.Person?>(null)
+    private var friendsMine by mutableStateOf<List<Friends.Person>>(emptyList())
+    private var friendsAddedMe by mutableStateOf<List<Friends.Person>>(emptyList())
+    private var friendsFound by mutableStateOf<List<Friends.Person>>(emptyList())
+    private var friendsQuery by mutableStateOf("")
+    private var friendsUsername by mutableStateOf("")
+    private var friendsStatus by mutableStateOf<String?>(null)
+    private var friendsLoading by mutableStateOf(false)
+
+    private fun refreshFriends() {
+        if (Account.current(this) == null) return
+        friendsLoading = true
+        Thread {
+            val result = runCatching {
+                val profile = Friends.myProfile(this)
+                val mine = if (profile != null) Friends.mine(this) else emptyList()
+                Triple(profile, mine, if (profile != null) Friends.addedMe(this, mine) else emptyList())
+            }
+            runOnUiThread {
+                friendsLoading = false
+                result.onSuccess { (profile, mine, addedMe) ->
+                    friendsProfile = profile; friendsMine = mine; friendsAddedMe = addedMe; friendsStatus = null
+                }.onFailure { friendsStatus = it.message }
+            }
+        }.start()
+    }
+
+    private fun friendsAction(action: () -> String?) {
+        Thread {
+            val error = runCatching { action() }.getOrElse { it.message }
+            runOnUiThread { friendsStatus = error; refreshFriends() }
+        }.start()
+    }
+
+    @Composable
+    private fun FriendsTab() {
+        HigPage(title = tr("Друзья"), subtitle = tr("Добавляйте друзей по юзернейму и звоните им персоной в VR"), bottomInset = TAB_BAR_ROOM) {
+            if (Account.current(this@MainActivity) == null) {
+                HigSection(footer = tr("Друзья и звонки работают с аккаунтом PhoneXR.")) {
+                    HigLink(tr("Войти")) { start(AccountActivity::class.java) }
+                }
+                return@HigPage
+            }
+            friendsStatus?.let { HigSection { HigRow(it) } }
+            val profile = friendsProfile
+            if (profile == null) {
+                HigSection(title = tr("Ваш юзернейм"), footer = tr("3–20 символов: a–z, 0–9, _ и . По нему вас найдут друзья.")) {
+                    InputRow("username", friendsUsername) { friendsUsername = it.lowercase().replace(" ", "") }
+                    HigLink(if (friendsLoading) tr("Загрузка…") else tr("Готово"), enabled = !friendsLoading) {
+                        val name = friendsUsername
+                        friendsAction { Friends.setUsername(this@MainActivity, name) }
+                    }
+                }
+                return@HigPage
+            }
+            HigSection { HigRow("@${profile.username}", profile.name) }
+            HigSection(title = tr("Найти по юзернейму")) {
+                InputRow("@username", friendsQuery) { value ->
+                    friendsQuery = value
+                    Thread {
+                        val found = runCatching { Friends.search(this@MainActivity, value) }.getOrDefault(emptyList())
+                        runOnUiThread { if (friendsQuery == value) friendsFound = found }
+                    }.start()
+                }
+                friendsFound.forEach { person ->
+                    val added = friendsMine.any { it.id == person.id }
+                    HigLink("@${person.username}", value = if (added) "✓" else tr("Добавить"), enabled = !added) {
+                        friendsAction { Friends.add(this@MainActivity, person) }
+                    }
+                }
+            }
+            if (friendsAddedMe.isNotEmpty()) HigSection(title = tr("Добавили вас")) {
+                friendsAddedMe.forEach { person ->
+                    HigLink("@${person.username}", value = tr("Добавить")) { friendsAction { Friends.add(this@MainActivity, person) } }
+                }
+            }
+            HigSection(title = tr("Мои друзья"), footer = tr("Позвонить можно из приложения «Звонки» в шлеме, когда друг в сети.")) {
+                if (friendsMine.isEmpty()) HigRow(tr("Пока пусто"))
+                friendsMine.forEach { person ->
+                    val online = Calls.online.any { it.id == person.id }
+                    HigLink("@${person.username}", value = if (online) tr("В сети") else tr("Удалить")) {
+                        if (!online) friendsAction { Friends.remove(this@MainActivity, person) }
+                    }
+                }
+            }
+        }
+    }
+
+    /** A one-line text field in a section row. */
+    @Composable
+    private fun InputRow(hint: String, value: String, onChange: (String) -> Unit) {
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+            if (value.isEmpty()) CupertinoText(hint, color = CupertinoTheme.colorScheme.secondaryLabel)
+            androidx.compose.foundation.text.BasicTextField(
+                value = value,
+                onValueChange = onChange,
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = CupertinoTheme.colorScheme.label, fontSize = 17.sp),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color(0xFF0A84FF)),
+            )
+        }
+    }
     /** A VR mode from the store whose activation steps are shown. */
     private var guide by mutableStateOf<VrMode?>(null)
     private var webApps by mutableStateOf<List<WebApps.App>>(emptyList())
@@ -109,6 +218,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tab = savedInstanceState?.getInt(KEY_TAB) ?: 0
+        L10n.init(this)
         rikka.shizuku.Shizuku.addRequestPermissionResultListener(shizukuListener)
         setContent { PhoneXRTheme { Root() } }
     }
@@ -143,6 +253,7 @@ class MainActivity : ComponentActivity() {
                 when (tab) {
                     0 -> MenuTab()
                     1 -> StoreTab()
+                    2 -> FriendsTab()
                     else -> SettingsTab()
                 }
             }
@@ -151,43 +262,64 @@ class MainActivity : ComponentActivity() {
                 backdrop = backdrop,
                 selectedTabIndex = { tab },
                 onTabSelected = { selectTab(it) },
-                tabsCount = 3
+                tabsCount = 4
             ) {
                 CupertinoNavigationBarItem(
                     onClick = { selectTab(0) },
                     icon = { CupertinoIcon(CupertinoIcons.Filled.House, null) },
-                    label = { CupertinoText("Меню") }
+                    label = { CupertinoText(tr("Меню")) }
                 )
                 CupertinoNavigationBarItem(
                     onClick = { selectTab(1) },
                     icon = { CupertinoIcon(CupertinoIcons.Filled.Cart, null) },
-                    label = { CupertinoText("Магазин") }
+                    label = { CupertinoText(tr("Магазин")) }
                 )
                 CupertinoNavigationBarItem(
                     onClick = { selectTab(2) },
+                    icon = { CupertinoIcon(CupertinoIcons.Filled.Person, null) },
+                    label = { CupertinoText(tr("Друзья")) }
+                )
+                CupertinoNavigationBarItem(
+                    onClick = { selectTab(3) },
                     icon = { CupertinoIcon(CupertinoIcons.Filled.Gearshape, null) },
-                    label = { CupertinoText("Настройки") }
+                    label = { CupertinoText(tr("Настройки")) }
                 )
             }
         }
 
         pendingPatch?.let { PatchDialog(it) }
         guide?.let { GuideDialog(it) }
+        if (languagePicker) {
+            CupertinoAlertDialog(
+                onDismissRequest = { languagePicker = false },
+                title = { CupertinoText(tr("Язык")) },
+                message = { CupertinoText("PhoneXR") }
+            ) {
+                L10n.Lang.values().forEach { lang ->
+                    default(onClick = {
+                        languagePicker = false
+                        L10n.set(this@MainActivity, lang)
+                        recreate()
+                    }) { CupertinoText((if (lang == L10n.current) "✓ " else "") + lang.title) }
+                }
+                cancel(onClick = { languagePicker = false }) { CupertinoText(tr("Отмена")) }
+            }
+        }
         update?.let { found ->
             CupertinoAlertDialog(
                 onDismissRequest = { update = null },
                 title = { CupertinoText("Доступно PhoneXR ${found.version}") },
                 message = { CupertinoText(Updates.formatSize(found.size)) }
             ) {
-                cancel(onClick = { update = null }) { CupertinoText("Позже") }
-                default(onClick = { update = null; start(UpdateActivity::class.java) }) { CupertinoText("Подробнее") }
+                cancel(onClick = { update = null }) { CupertinoText(tr("Позже")) }
+                default(onClick = { update = null; start(UpdateActivity::class.java) }) { CupertinoText(tr("Подробнее")) }
             }
         }
         ready?.let { ReadyDialog(it) }
         error?.let { message ->
             CupertinoAlertDialog(
                 onDismissRequest = { error = null },
-                title = { CupertinoText("Не получилось") },
+                title = { CupertinoText(tr("Не получилось")) },
                 message = { CupertinoText(message) }
             ) { default(onClick = { error = null }) { CupertinoText("OK") } }
         }
@@ -208,6 +340,7 @@ class MainActivity : ComponentActivity() {
 
     private fun selectTab(index: Int) {
         tab = index
+        if (index == 2) refreshFriends()
         if (index == 1 && storeItems == null && !storeLoading) refreshStore()
     }
 
@@ -221,7 +354,7 @@ class MainActivity : ComponentActivity() {
             bottomInset = TAB_BAR_ROOM
         ) {
             HigSection(footer = "VR‑дом в смешанной реальности: щипок — открыть, кулак — перетащить иконки, ладонь к лицу + щипок — меню. Joy‑Con: ZR или A.") {
-                HigLink("Войти в VR") {
+                HigLink(tr("Войти в VR")) {
                     enterVr.launch(
                         if (android.os.Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.CAMERA, Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.RECORD_AUDIO)
                         else arrayOf(Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.RECORD_AUDIO)
@@ -230,7 +363,7 @@ class MainActivity : ComponentActivity() {
             }
 
             HigSection(
-                title = "Игры",
+                title = tr("Игры"),
                 footer = "Нажмите на игру, чтобы включить трекинг и запустить её. " +
                     "Игры Gear VR сначала нужно пропатчить: PhoneXR подменит в них VrApi на OpenXR."
             ) {
@@ -243,16 +376,16 @@ class MainActivity : ComponentActivity() {
             }
 
             HigSection(
-                title = "Установка",
+                title = tr("Установка"),
                 footer = "APK OpenXR-игры, игры Gear VR (64 и 32 бита) или пакет .pxr. " +
                     "PhoneXR подготовит сборку, подпишет её и откроет установку."
             ) {
-                HigLink(busy ?: "Установить игру из файла", enabled = busy == null) {
+                HigLink(busy ?: tr("Установить игру из файла"), enabled = busy == null) {
                     chooseApk.launch(
                         arrayOf("application/vnd.android.package-archive", "application/zip", "application/octet-stream")
                     )
                 }
-                HigLink("Магазин игр") { selectTab(1) }
+                HigLink(tr("Магазин игр")) { selectTab(1) }
             }
 
             RuntimeSection()
@@ -269,8 +402,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            HigSection(title = "Трекинг", footer = status) {
-                HigLink("Остановить трекинг") {
+            HigSection(title = tr("Трекинг"), footer = status) {
+                HigLink(tr("Остановить трекинг")) {
                     stopService(Intent(this@MainActivity, HandTrackingService::class.java))
                     status = "Трекинг остановлен"
                 }
@@ -298,7 +431,7 @@ class MainActivity : ComponentActivity() {
             }
             HigLink(
                 "OpenXR Runtime Broker",
-                value = if (PhoneXrRuntime.brokerInstalled(this@MainActivity)) "Открыть" else "Google Play"
+                value = if (PhoneXrRuntime.brokerInstalled(this@MainActivity)) tr("Открыть") else "Google Play"
             ) { PhoneXrRuntime.openBroker(this@MainActivity) }
         }
     }
@@ -348,30 +481,30 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun StoreTab() {
         HigPage(
-            title = "Магазин",
+            title = tr("Магазин"),
             subtitle = "VR-игры с сервера PhoneXR: скачиваются и ставятся как есть.",
             bottomInset = TAB_BAR_ROOM
         ) {
             HigSection(
-                title = "VR‑режимы",
+                title = tr("VR‑режимы"),
                 footer = "Обычные Minecraft и Roblox на большом экране в VR: своя комната, поворот головы, " +
                     "игра двумя руками или Joy‑Con. Нажмите на режим — появится инструкция."
             ) {
                 VR_MODES.forEach { mode -> VrModeRow(mode) }
             }
             HigSection(
-                title = "Приложения PhoneXR",
+                title = tr("Приложения PhoneXR"),
                 footer = "Android‑приложения: любые приложения телефона окнами в VR (нужен Shizuku). Появляется на главном экране VR."
             ) {
                 val added = resumes >= 0 && androidApps
-                HigLink("Android‑приложения", value = if (added) "Удалить" else "Получить") {
+                HigLink(tr("Android‑приложения"), value = if (added) tr("Удалить") else tr("Получить")) {
                     androidApps = !added
                     AndroidAppsContent.setEnabled(this@MainActivity, !added)
                 }
             }
             val items = storeItems
             HigSection(
-                title = "Игры",
+                title = tr("Игры"),
                 footer = when {
                     storeError != null -> storeError
                     items != null && items.isEmpty() -> GameStore.EMPTY_HINT
@@ -379,19 +512,19 @@ class MainActivity : ComponentActivity() {
                 }
             ) {
                 when {
-                    storeLoading && items == null -> HigRow("Загрузка…", trailing = { CupertinoActivityIndicator() })
-                    items.isNullOrEmpty() -> HigRow(if (storeError != null) "Магазин недоступен" else "Пока пусто")
+                    storeLoading && items == null -> HigRow(tr("Загрузка…"), trailing = { CupertinoActivityIndicator() })
+                    items.isNullOrEmpty() -> HigRow(if (storeError != null) "Магазин недоступен" else tr("Пока пусто"))
                     else -> items.forEach { item -> StoreRow(item) }
                 }
             }
             if (webApps.isNotEmpty()) {
                 HigSection(
-                    title = "Веб‑приложения",
+                    title = tr("Веб‑приложения"),
                     footer = "Открываются в браузере PhoneXR прямо в VR. Добавленные появляются на главном экране VR."
                 ) {
                     webApps.forEach { app ->
                         val added = app.url in installedWeb
-                        HigLink(app.name, value = if (added) "Открыть" else "Добавить") {
+                        HigLink(app.name, value = if (added) tr("Открыть") else tr("Добавить")) {
                             if (added) {
                                 if (!WebApps.open(this@MainActivity, app.url)) error = "Установите браузер PhoneXR"
                             } else {
@@ -403,7 +536,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             HigSection {
-                HigLink(if (storeLoading) "Обновление…" else "Обновить", enabled = !storeLoading) { refreshStore() }
+                HigLink(if (storeLoading) tr("Обновление…") else tr("Обновить"), enabled = !storeLoading) { refreshStore() }
             }
         }
     }
@@ -417,9 +550,9 @@ class MainActivity : ComponentActivity() {
             icon = { AppIcon(if (installed) mode.packageName else packageName) },
             caption = {
                 if (installed) {
-                    CupertinoText("Играть", color = CupertinoTheme.colorScheme.accent)
+                    CupertinoText(tr("Играть"), color = CupertinoTheme.colorScheme.accent)
                 } else {
-                    CupertinoText("Скачать", color = CupertinoTheme.colorScheme.accent)
+                    CupertinoText(tr("Скачать"), color = CupertinoTheme.colorScheme.accent)
                 }
             },
             title = {
@@ -450,18 +583,21 @@ class MainActivity : ComponentActivity() {
                         (if (installed) "✓ " else "1. ") + "Установите ${mode.game} из Google Play.",
                         (if (ready) "✓ " else "2. ") + "Установите и запустите Shizuku (через отладку по Wi‑Fi), разрешите доступ PhoneXR.",
                         "3. Нажмите «Играть»: игра откроется на большом экране — ${mode.scene}.",
-                        "4. Управление: щипок любой руки — нажатие по экрану, две руки — два пальца. " +
+                        if (mode.packageName == MINECRAFT)
+                            "4. Minecraft VR: поворот головы — камера, «пистолет» из пальцев — идти, кулак — ломать и бить, " +
+                                "щипок — поставить блок. В настройках Minecraft включите «Раздельное управление» (Split controls)."
+                        else "4. Управление: щипок любой руки — нажатие по экрану, две руки — два пальца. " +
                             "Joy‑Con и геймпад работают как в самой игре. Тап по телефону выравнивает вид.",
                     ).joinToString("\n")
                 )
             }
         ) {
-            cancel(onClick = { guide = null }) { CupertinoText("Закрыть") }
+            cancel(onClick = { guide = null }) { CupertinoText(tr("Закрыть")) }
             when {
                 !installed -> default(onClick = {
                     guide = null
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${mode.packageName}")))
-                }) { CupertinoText("Скачать") }
+                }) { CupertinoText(tr("Скачать")) }
                 !ready -> default(onClick = {
                     guide = null
                     if (shizuku == VirtualScreen.Access.NEEDS_PERMISSION) VirtualScreen.requestPermission()
@@ -471,7 +607,7 @@ class MainActivity : ComponentActivity() {
                 else -> default(onClick = {
                     guide = null
                     openCinema(mode.packageName, mode.sceneId)
-                }) { CupertinoText("Играть") }
+                }) { CupertinoText(tr("Играть")) }
             }
         }
     }
@@ -486,7 +622,7 @@ class MainActivity : ComponentActivity() {
             icon = { StoreIcon(item) },
             caption = {
                 when {
-                    progress == null -> CupertinoText("Загрузить", color = CupertinoTheme.colorScheme.accent)
+                    progress == null -> CupertinoText(tr("Загрузить"), color = CupertinoTheme.colorScheme.accent)
                     progress < 0f -> CupertinoActivityIndicator()
                     progress >= 1f -> CupertinoText("Подготовка…")
                     else -> CupertinoText("${(progress * 100).roundToInt()}%")
@@ -587,21 +723,22 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun SettingsTab() {
-        HigPage(title = "Настройки", bottomInset = TAB_BAR_ROOM) {
-            HigSection(title = "Управление") {
-                HigLink("Управление и Joy‑Con") { start(SettingsActivity::class.java) }
-                HigLink("Joy‑Con через камеру") { start(JoyConCameraActivity::class.java) }
+        HigPage(title = tr("Настройки"), bottomInset = TAB_BAR_ROOM) {
+            HigSection(title = tr("Управление")) {
+                HigLink(tr("Управление и Joy‑Con")) { start(SettingsActivity::class.java) }
+                HigLink(tr("Joy‑Con через камеру")) { start(JoyConCameraActivity::class.java) }
             }
-            HigSection(title = "Проверка") {
-                HigLink("Проверить гироскоп Joy‑Con") { start(GyroTestActivity::class.java) }
+            HigSection(title = tr("Проверка")) {
+                HigLink(tr("Проверить гироскоп Joy‑Con")) { start(GyroTestActivity::class.java) }
             }
-            HigSection(title = "Магазин", footer = "Игры берутся из папки «${GameStore.FOLDER}» в Supabase и из файлов .json в корне репозитория PhoneXR на GitHub.") {
-                HigRow("Сервер", GameStore.URL_BASE.removePrefix("https://"))
+            HigSection(title = tr("Магазин"), footer = "Игры берутся из папки «${GameStore.FOLDER}» в Supabase и из файлов .json в корне репозитория PhoneXR на GitHub.") {
+                HigRow(tr("Сервер"), GameStore.URL_BASE.removePrefix("https://"))
             }
             HigSection {
-                HigLink("Аккаунт", value = if (resumes >= 0) Account.current(this@MainActivity)?.name ?: "Войти" else null) { start(AccountActivity::class.java) }
-                HigLink("Обновление ПО") { start(UpdateActivity::class.java) }
-                HigLink("О приложении") { start(AboutActivity::class.java) }
+                HigLink(tr("Язык"), value = L10n.current.title) { languagePicker = true }
+                HigLink(tr("Аккаунт"), value = if (resumes >= 0) Account.current(this@MainActivity)?.name ?: tr("Войти") else null) { start(AccountActivity::class.java) }
+                HigLink(tr("Обновление ПО")) { start(UpdateActivity::class.java) }
+                HigLink(tr("О приложении")) { start(AboutActivity::class.java) }
             }
         }
     }
@@ -624,7 +761,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
         ) {
-            cancel(onClick = { pendingPatch = null }) { CupertinoText("Отмена") }
+            cancel(onClick = { pendingPatch = null }) { CupertinoText(tr("Отмена")) }
             default(onClick = {
                 pendingPatch = null
                 patch(Uri.fromFile(game.apk), replaces = game)
@@ -652,7 +789,7 @@ class MainActivity : ComponentActivity() {
                 )
             }
         ) {
-            cancel(onClick = { ready = null }) { CupertinoText("Позже") }
+            cancel(onClick = { ready = null }) { CupertinoText(tr("Позже")) }
             if (installed) {
                 destructive(onClick = { uninstall(replaces!!) }) { CupertinoText("Удалить старую") }
             } else {

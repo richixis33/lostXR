@@ -35,10 +35,13 @@ class CallContent(private val context: Context) : VrWindow.Content {
     private val selfRenderer = Persona.load(context)?.let { PersonaRenderer(it) }
     private var voice: Voice? = null
     private val listener: () -> Unit = { fresh = true }
+    /** People added in the Friends tab; shown first, online or not. */
+    @Volatile private var friends: List<Friends.Person> = emptyList()
 
     override fun attach(context: Context, texture: SurfaceTexture?, onReady: () -> Unit) {
         Calls.listen(listener)
         thread { Calls.start(context) }
+        thread { friends = runCatching { Friends.mine(context) }.getOrDefault(emptyList()); fresh = true }
         voice = VoiceHub.acquire(context)
         thread(name = "PhoneXR calls") {
             while (running) {
@@ -53,7 +56,7 @@ class CallContent(private val context: Context) : VrWindow.Content {
 
     override fun toolbarTitle() = when (Calls.state) {
         Calls.State.IN_CALL -> Calls.peer?.name ?: "Звонок"
-        else -> "Звонки"
+        else -> tr("Звонки")
     }
 
     override val toolbarVersion get() = Calls.state.ordinal
@@ -83,13 +86,13 @@ class CallContent(private val context: Context) : VrWindow.Content {
             Calls.State.IDLE -> contacts()
             Calls.State.CALLING -> {
                 center("Звоним ${Calls.peer?.name ?: ""}…", 440f, 56f, bold = true)
-                button(RectF(500f, 700f, 900f, 790f), "Отменить", RED) { Calls.hangUp() }
+                button(RectF(500f, 700f, 900f, 790f), tr("Отменить"), RED) { Calls.hangUp() }
             }
             Calls.State.RINGING -> {
                 center("${Calls.peer?.name ?: "Кто-то"} звонит", 420f, 60f, bold = true)
                 center("Звонок с персоной", 490f, 36f, color = GREY)
-                button(RectF(300f, 680f, 660f, 780f), "Отклонить", RED) { Calls.decline() }
-                button(RectF(740f, 680f, 1100f, 780f), "Принять", GREEN) { Calls.accept() }
+                button(RectF(300f, 680f, 660f, 780f), tr("Отклонить"), RED) { Calls.decline() }
+                button(RectF(740f, 680f, 1100f, 780f), tr("Принять"), GREEN) { Calls.accept() }
             }
             Calls.State.IN_CALL -> inCall()
         }
@@ -97,7 +100,7 @@ class CallContent(private val context: Context) : VrWindow.Content {
     }
 
     private fun offline() {
-        center("Звонки", 200f, 64f, bold = true)
+        center(tr("Звонки"), 200f, 64f, bold = true)
         val signedIn = Account.current(context) != null
         center(if (signedIn) "Подключение…" else "Войдите в аккаунт PhoneXR", 440f, 44f)
         if (!signedIn) center("На телефоне: PhoneXR → Настройки → Аккаунт", 510f, 34f, color = GREY)
@@ -105,23 +108,30 @@ class CallContent(private val context: Context) : VrWindow.Content {
     }
 
     private fun contacts() {
-        text("Звонки", 60f, 110f, 64f, bold = true)
+        text(tr("Звонки"), 60f, 110f, 64f, bold = true)
         text("Вы: ${Account.current(context)?.name ?: ""}", 60f, 170f, 34f, GREY)
         Calls.message?.let { text(it, 60f, 230f, 32f, Color.rgb(255, 180, 90)) }
-        val people = Calls.online
-        if (people.isEmpty()) {
-            center("Сейчас никого нет в сети", 520f, 42f, color = GREY)
-            center("Друзья появятся здесь, когда откроют PhoneXR в шлеме", 580f, 32f, color = GREY)
+        // Friends first (online ones can be called), then anyone else who is online.
+        val online = Calls.online
+        val friendIds = friends.map { it.id }.toSet()
+        val rows = friends.map { friend ->
+            Triple(Calls.Contact(friend.id, friend.name.ifBlank { friend.username }), online.any { it.id == friend.id }, "@${friend.username}")
+        }.sortedByDescending { it.second } + online.filter { it.id !in friendIds }.map { Triple(it, true, null) }
+        if (rows.isEmpty()) {
+            center(tr("Сейчас никого нет в сети"), 520f, 42f, color = GREY)
+            center("Добавьте друзей во вкладке «Друзья» на телефоне", 580f, 32f, color = GREY)
             return
         }
-        people.take(6).forEachIndexed { i, contact ->
+        rows.take(6).forEachIndexed { i, (contact, isOnline, username) ->
             val top = 270f + i * 120f
             paint.color = Color.argb(60, 255, 255, 255)
             canvas.drawRoundRect(RectF(60f, top, pixelWidth - 60f, top + 100f), 30f, 30f, paint)
-            paint.color = GREEN
+            paint.color = if (isOnline) GREEN else Color.argb(120, 255, 255, 255)
             canvas.drawCircle(110f, top + 50f, 14f, paint)
-            text(contact.name, 150f, top + 64f, 42f)
-            button(RectF(pixelWidth - 360f, top + 12f, pixelWidth - 80f, top + 88f), "Позвонить", GREEN) { Calls.call(contact) }
+            text(contact.name, 150f, top + 58f, 42f, if (isOnline) Color.WHITE else GREY)
+            username?.let { text(it, 150f, top + 90f, 26f, GREY) }
+            if (isOnline) button(RectF(pixelWidth - 360f, top + 12f, pixelWidth - 80f, top + 88f), tr("Позвонить"), GREEN) { Calls.call(contact) }
+            else text(tr("Не в сети"), pixelWidth - 300f, top + 62f, 32f, GREY)
         }
     }
 
@@ -171,10 +181,10 @@ class CallContent(private val context: Context) : VrWindow.Content {
             canvas.drawRoundRect(box, 30f, 30f, paint)
             canvas.drawBitmap(self, null, box, paint)
         }
-        button(RectF(360f, 880f, 680f, 970f), if (Calls.muted) "Микрофон выкл." else "Микрофон", if (Calls.muted) RED else Color.argb(120, 255, 255, 255)) {
+        button(RectF(360f, 880f, 680f, 970f), if (Calls.muted) "Микрофон выкл." else tr("Микрофон"), if (Calls.muted) RED else Color.argb(120, 255, 255, 255)) {
             Calls.muted = !Calls.muted
         }
-        button(RectF(720f, 880f, 1040f, 970f), "Завершить", RED) { Calls.hangUp() }
+        button(RectF(720f, 880f, 1040f, 970f), tr("Завершить"), RED) { Calls.hangUp() }
     }
 
     private fun button(rect: RectF, label: String, color: Int, action: () -> Unit) {

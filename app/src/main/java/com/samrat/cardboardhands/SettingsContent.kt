@@ -36,7 +36,7 @@ class SettingsContent(
         fun boundaryText(): String
     }
 
-    private enum class Page(val title: String) { ABOUT("О гарнитуре"), UPDATE("Обновление ПО"), FACE("Лицо"), BOUNDARY("Граница") }
+    private enum class Page(val title: String) { ABOUT(tr("О гарнитуре")), UPDATE(tr("Обновление ПО")), FACE(tr("Лицо")), BOUNDARY(tr("Граница")) }
 
     override val pixelWidth = 1600
     override val pixelHeight = 1000
@@ -61,7 +61,7 @@ class SettingsContent(
 
     override fun takeBitmap(): Bitmap? = if (fresh) synchronized(this) { fresh = false; bitmap } else null
 
-    override fun toolbarTitle() = "Настройки"
+    override fun toolbarTitle() = tr("Настройки")
 
     override fun touch(action: Int, u: Float, v: Float) {
         if (action != MotionEvent.ACTION_UP) return
@@ -95,12 +95,12 @@ class SettingsContent(
     }
 
     private fun update() {
-        text("Обновление ПО", 480f, 100f, 52f, Color.WHITE, bold = true)
+        text(tr("Обновление ПО"), 480f, 100f, 52f, Color.WHITE, bold = true)
         card(480f, 150f, 2)
-        text("Автообновление", 510f, 200f, 34f, Color.WHITE)
+        text(tr("Автообновление"), 510f, 200f, 34f, Color.WHITE)
         text(if (Updates.autoUpdate(context)) "Вкл." else "Выкл.", 1560f, 200f, 34f, Color.rgb(170, 170, 178), right = true)
         buttons += RectF(480f, 150f, 1580f, 228f) to { Updates.setAutoUpdate(context, !Updates.autoUpdate(context)) }
-        text("Бета‑обновления", 510f, 278f, 34f, Color.WHITE)
+        text(tr("Бета‑обновления"), 510f, 278f, 34f, Color.WHITE)
         text(if (Updates.beta(context)) "Вкл." else "Выкл.", 1560f, 278f, 34f, Color.rgb(170, 170, 178), right = true)
         buttons += RectF(480f, 228f, 1580f, 306f) to { Updates.setBeta(context, !Updates.beta(context)); checkUpdate() }
         val found = release
@@ -121,8 +121,8 @@ class SettingsContent(
                 text(Updates.formatSize(found.size), 660f, 470f, 32f, Color.rgb(170, 170, 178))
                 val progress = downloadProgress
                 button(RectF(510f, 530f, 1550f, 610f), when {
-                    progress == null -> "Обновить сейчас"
-                    progress < 0f -> "Загрузка…"
+                    progress == null -> tr("Обновить сейчас")
+                    progress < 0f -> tr("Загрузка…")
                     else -> "Загрузка ${(progress * 100).toInt()}%"
                 }) {
                     if (downloadProgress == null) {
@@ -180,7 +180,7 @@ class SettingsContent(
         // Sidebar.
         paint.color = Color.rgb(30, 30, 33)
         canvas.drawRect(0f, 0f, 420f, pixelHeight.toFloat(), paint)
-        text("Настройки", 40f, 90f, 48f, Color.WHITE, bold = true)
+        text(tr("Настройки"), 40f, 90f, 48f, Color.WHITE, bold = true)
         Page.values().forEachIndexed { index, item ->
             val rect = RectF(20f, 140f + index * 96f, 400f, 220f + index * 96f)
             if (item == page) {
@@ -200,7 +200,7 @@ class SettingsContent(
     }
 
     private fun about() {
-        text("О гарнитуре", 480f, 100f, 52f, Color.WHITE, bold = true)
+        text(tr("О гарнитуре"), 480f, 100f, 52f, Color.WHITE, bold = true)
         val metrics = context.resources.displayMetrics
         val battery = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
             ?.let { it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) * 100 / it.getIntExtra(BatteryManager.EXTRA_SCALE, 100) }
@@ -231,7 +231,7 @@ class SettingsContent(
     }
 
     private fun face() {
-        text("Лицо", 480f, 100f, 52f, Color.WHITE, bold = true)
+        text(tr("Лицо"), 480f, 100f, 52f, Color.WHITE, bold = true)
         if (picking) {
             text("Выберите фото, где лицо видно спереди", 480f, 160f, 32f, Color.rgb(170, 170, 178))
             photos.forEachIndexed { index, uri ->
@@ -250,7 +250,7 @@ class SettingsContent(
                 buttons += rect to { buildFace(uri) }
             }
             if (photos.isEmpty()) text("Нет фото или нет доступа к галерее", 480f, 260f, 34f, Color.WHITE)
-            button(RectF(480f, 900f, 780f, 970f), "Отмена") { picking = false }
+            button(RectF(480f, 900f, 780f, 970f), tr("Отмена")) { picking = false }
             return
         }
         val exists = Persona.exists(context)
@@ -270,26 +270,26 @@ class SettingsContent(
         status?.let { wrap(it, 480f, 640f, 1560f, 32f, Color.rgb(255, 180, 90)) }
         if (busy) return
         if (exists) {
-            button(RectF(480f, 740f, 830f, 820f), "Показать лицо") { host.showPersona() }
+            button(RectF(480f, 740f, 830f, 820f), tr("Показать лицо")) { host.showPersona() }
             button(RectF(860f, 740f, 1210f, 820f), "Другое фото") { choosePhoto() }
-            button(RectF(1240f, 740f, 1560f, 820f), "Удалить", Color.rgb(255, 69, 58)) {
+            button(RectF(1240f, 740f, 1560f, 820f), tr("Удалить"), Color.rgb(255, 69, 58)) {
                 Persona.delete(context); preview = null; status = "Лицо удалено"
             }
         } else {
-            button(RectF(480f, 740f, 880f, 820f), "Добавить лицо") { choosePhoto() }
+            button(RectF(480f, 740f, 880f, 820f), tr("Добавить лицо")) { choosePhoto() }
         }
     }
 
     private fun boundary() {
-        text("Граница", 480f, 100f, 52f, Color.WHITE, bold = true)
+        text(tr("Граница"), 480f, 100f, 52f, Color.WHITE, bold = true)
         wrap(
             "Обойдите свободное место по краю — PhoneXR запомнит границу. Если подойдёте к ней, " +
                 "появится стена, а если выйдете — предупреждение. Начинайте с того же места, где запускаете VR.",
             480f, 170f, 1560f, 34f
         )
         text(host.boundaryText(), 480f, 470f, 36f, Color.rgb(170, 170, 178))
-        button(RectF(480f, 740f, 900f, 820f), "Настроить границу") { host.startBoundary() }
-        button(RectF(930f, 740f, 1300f, 820f), "Удалить границу", Color.rgb(255, 69, 58)) { host.clearBoundary() }
+        button(RectF(480f, 740f, 900f, 820f), tr("Настроить границу")) { host.startBoundary() }
+        button(RectF(930f, 740f, 1300f, 820f), tr("Удалить границу"), Color.rgb(255, 69, 58)) { host.clearBoundary() }
     }
 
     private fun card(x: Float, y: Float, rows: Int) {

@@ -73,7 +73,7 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
 
     override fun takeBitmap(): Bitmap? = if (fresh) synchronized(this) { fresh = false; bitmap } else null
 
-    override fun toolbarTitle() = "Магазин"
+    override fun toolbarTitle() = tr("Магазин")
 
     override fun touch(action: Int, u: Float, v: Float) {
         if (action != MotionEvent.ACTION_UP) return
@@ -95,23 +95,23 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
             Triple("Brawl Stars VR", "com.supercell.brawlstars", CinemaActivity.SCENE_BRAWL) to "Посреди арены, 360°",
         ).map { (mode, subtitle) ->
             val (title, name, scene) = mode
-            Card(title, subtitle, { appIcon(name) }, { if (installed(name)) "Играть" else "Скачать" }) {
+            Card(title, subtitle, { appIcon(name) }, { if (installed(name)) tr("Играть") else tr("Скачать") }) {
                 if (installed(name)) host.openCinema(name, scene)
                 else context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=$name"))
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }
         val apps = listOf(
-            Card("Звонки", "Общение персонами: голос, лицо и руки", { null }, { "Открыть" }) { host.openCalls() },
-            Card("Android‑приложения", "Любые приложения телефона окнами в VR", { null },
-                { if (AndroidAppsContent.enabled(context)) "Удалить" else "Получить" }) {
+            Card(tr("Звонки"), "Общение персонами: голос, лицо и руки", { null }, { tr("Открыть") }) { host.openCalls() },
+            Card(tr("Android‑приложения"), "Любые приложения телефона окнами в VR", { null },
+                { if (AndroidAppsContent.enabled(context)) tr("Удалить") else tr("Получить") }) {
                 AndroidAppsContent.setEnabled(context, !AndroidAppsContent.enabled(context))
                 host.homeChanged()
             },
         )
         val gameCards = games.map { item ->
             Card(item.title, item.extension.uppercase() + if (item.size > 0) " · " + Updates.formatSize(item.size) else "",
-                { icons[item.path] }, { progress[item.path]?.let { "$it%" } ?: "Загрузить" }) {
+                { icons[item.path] }, { progress[item.path]?.let { "$it%" } ?: tr("Загрузить") }) {
                 if (progress.containsKey(item.path)) return@Card
                 progress[item.path] = 0
                 draw()
@@ -127,16 +127,16 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
         }
         val webCards = web.map { app ->
             Card(app.name, app.url.removePrefix("https://").substringBefore('/'), { WebApps.icon(app) },
-                { if (WebApps.installed(context).any { it.url == app.url }) "Открыть" else "Добавить" }) {
+                { if (WebApps.installed(context).any { it.url == app.url }) tr("Открыть") else tr("Добавить") }) {
                 if (WebApps.installed(context).any { it.url == app.url }) host.openWebApp(app)
                 else { WebApps.add(context, app); host.homeChanged(); host.message("«${app.name}» на главном экране") }
             }
         }
         sections = listOfNotNull(
-            Section("VR‑режимы", modes),
-            Section("Приложения PhoneXR", apps),
-            Section(if (loading) "Игры · загрузка…" else "Игры", gameCards).takeIf { loading || gameCards.isNotEmpty() },
-            Section("Веб‑приложения", webCards).takeIf { webCards.isNotEmpty() },
+            Section(tr("VR‑режимы"), modes),
+            Section(tr("Приложения PhoneXR"), apps),
+            Section(if (loading) "Игры · загрузка…" else tr("Игры"), gameCards).takeIf { loading || gameCards.isNotEmpty() },
+            Section(tr("Веб‑приложения"), webCards).takeIf { webCards.isNotEmpty() },
         )
     }
 
@@ -146,7 +146,7 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
         bitmap.eraseColor(Color.TRANSPARENT)
         paint.color = Color.argb(225, 30, 30, 36)
         canvas.drawRoundRect(RectF(0f, 0f, pixelWidth.toFloat(), pixelHeight.toFloat()), 60f, 60f, paint)
-        text("Магазин", 60f, 105f, 66f, Color.WHITE, bold = true)
+        text(tr("Магазин"), 60f, 105f, 66f, Color.WHITE, bold = true)
         // Lay the sections out in a two-column grid and cut it into pages.
         val rows = ArrayList<Pair<Section?, List<Card>>>()
         for (section in sections) {

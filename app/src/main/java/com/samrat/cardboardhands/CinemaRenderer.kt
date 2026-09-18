@@ -31,6 +31,8 @@ class CinemaRenderer(
     @Volatile var cursors: List<Cursor> = emptyList()
     /** See-through hands in head space, drawn over everything like in the VR home. */
     @Volatile var ghosts: List<FloatArray> = emptyList()
+    /** Minecraft VR: the screen stays in front of the eyes, the head turns the game's camera instead. */
+    @Volatile var headLocked = false
     /** Where the screen is, for hit tests from the hand thread (centre y, z, width). */
     val screenPlacement: FloatArray get() = if (model != null) floatArrayOf(model.screenCenterY, model.screenZ, model.screenWidth, model.eyeHeight)
         else floatArrayOf(SCREEN_CENTER_Y, SCREEN_Z, SCREEN_WIDTH, EYE_HEIGHT)
@@ -118,8 +120,15 @@ class CinemaRenderer(
             Matrix.multiplyMM(view, 0, eye, 0, worldToHead, 0)
             Matrix.multiplyMM(viewProjection, 0, projection, 0, view, 0)
             if (model != null) model.draw(viewProjection) else sceneMesh?.draw(colorProgram, viewProjection)
-            drawScreen(viewProjection, place[2], place[0], place[1])
-            drawCursors(viewProjection, place[2], place[0], place[1])
+            if (headLocked) {
+                val eyeOnly = FloatArray(16)
+                Matrix.multiplyMM(eyeOnly, 0, projection, 0, eye, 0)
+                GLES20.glClear(GLES20.GL_DEPTH_BUFFER_BIT)
+                drawScreen(eyeOnly, HEAD_SCREEN_WIDTH, 0f, -HEAD_SCREEN_DISTANCE)
+            } else {
+                drawScreen(viewProjection, place[2], place[0], place[1])
+                drawCursors(viewProjection, place[2], place[0], place[1])
+            }
             drawGhosts()
         }
     }
@@ -335,6 +344,8 @@ class CinemaRenderer(
     }
 
     companion object {
+        private const val HEAD_SCREEN_WIDTH = 2.6f
+        private const val HEAD_SCREEN_DISTANCE = 1.9f
         const val SCREEN_PIXELS_W = 1920
         const val SCREEN_PIXELS_H = 1080
         private const val SCREEN_WIDTH = 3.4f

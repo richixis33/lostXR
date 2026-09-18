@@ -50,7 +50,7 @@ class AndroidAppsContent(private val context: Context, private val open: (packag
 
     override fun takeBitmap(): Bitmap? = if (fresh) synchronized(this) { fresh = false; bitmap } else null
 
-    override fun toolbarTitle() = "Android‑приложения"
+    override fun toolbarTitle() = tr("Android‑приложения")
 
     override fun touch(action: Int, u: Float, v: Float) {
         if (action != MotionEvent.ACTION_UP) return

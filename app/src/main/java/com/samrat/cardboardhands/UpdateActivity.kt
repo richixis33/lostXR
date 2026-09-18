@@ -86,14 +86,14 @@ class UpdateActivity : ComponentActivity() {
     @OptIn(ExperimentalCupertinoApi::class)
     @Composable
     private fun Screen() {
-        HigPage(title = "Обновление ПО", onBack = ::finish) {
+        HigPage(title = tr("Обновление ПО"), onBack = ::finish) {
             HigSection {
                 SectionItem(trailingContent = {
                     CupertinoSwitch(checked = auto, onCheckedChange = { auto = it; Updates.setAutoUpdate(this@UpdateActivity, it) })
-                }) { CupertinoText("Автообновление") }
+                }) { CupertinoText(tr("Автообновление")) }
                 SectionItem(trailingContent = {
                     CupertinoSwitch(checked = beta, onCheckedChange = { beta = it; Updates.setBeta(this@UpdateActivity, it); check() })
-                }) { CupertinoText("Бета‑обновления") }
+                }) { CupertinoText(tr("Бета‑обновления")) }
             }
             val found = release
             when {
@@ -101,7 +101,7 @@ class UpdateActivity : ComponentActivity() {
                 found != null -> UpdateCard(found)
                 else -> Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     CupertinoText("PhoneXR ${Updates.currentVersion(this@UpdateActivity)}", fontWeight = FontWeight.SemiBold)
-                    CupertinoText(error ?: "Установлена последняя версия", color = CupertinoTheme.colorScheme.secondaryLabel)
+                    CupertinoText(error ?: tr("Установлена последняя версия"), color = CupertinoTheme.colorScheme.secondaryLabel)
                 }
             }
         }
@@ -136,8 +136,8 @@ class UpdateActivity : ComponentActivity() {
             ) {
                 CupertinoText(
                     when {
-                        value == null -> "Обновить сейчас"
-                        value < 0f -> "Загрузка…"
+                        value == null -> tr("Обновить сейчас")
+                        value < 0f -> tr("Загрузка…")
                         else -> "Загрузка ${(value * 100).roundToInt()}%"
                     },
                     color = Color.White, fontWeight = FontWeight.SemiBold

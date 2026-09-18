@@ -54,6 +54,10 @@
         <package android:name="org.freedesktop.monado.openxr_runtime.out_of_process" />
         <package android:name="org.khronos.openxr.runtime_broker" />
         <package android:name="com.roblox.client" />
+        <!-- Elix listens through the system speech recognizer. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
         <package android:name="com.supercell.brawlstars" />
     </queries>
 

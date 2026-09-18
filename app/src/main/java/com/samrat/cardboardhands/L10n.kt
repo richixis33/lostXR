@@ -1,0 +1,132 @@
+package com.samrat.cardboardhands
+
+import android.content.Context
+
+/**
+ * PhoneXR's languages. The interface is written in Russian; [tr] gives the chosen language's text
+ * for a Russian source string (untranslated strings stay Russian).
+ */
+object L10n {
+    enum class Lang(val code: String, val title: String, val speech: String) {
+        RU("ru", "Русский", "ru-RU"),
+        EN("en", "English", "en-US"),
+        PT_BR("pt-BR", "Português (Brasil)", "pt-BR"),
+        PT_PT("pt-PT", "Português (Portugal)", "pt-PT"),
+    }
+
+    private const val PREFS = "language"
+    @Volatile var current = Lang.RU
+        private set
+
+    fun init(context: Context) {
+        current = runCatching { Lang.valueOf(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("lang", Lang.RU.name)!!) }
+            .getOrDefault(Lang.RU)
+    }
+
+    fun set(context: Context, lang: Lang) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("lang", lang.name).apply()
+        current = lang
+    }
+
+    fun tr(ru: String): String {
+        val index = when (current) { Lang.RU -> return ru; Lang.EN -> 0; Lang.PT_BR -> 1; Lang.PT_PT -> 2 }
+        return DICT[ru]?.get(index) ?: ru
+    }
+
+    /** Russian → English, Portuguese (Brazil), Portuguese (Portugal). */
+    private val DICT: Map<String, Array<String>> = mapOf(
+        // Tabs and main screens
+        "Меню" to arrayOf("Menu", "Menu", "Menu"),
+        "Магазин" to arrayOf("Store", "Loja", "Loja"),
+        "Друзья" to arrayOf("Friends", "Amigos", "Amigos"),
+        "Настройки" to arrayOf("Settings", "Ajustes", "Definições"),
+        "Войти в VR" to arrayOf("Enter VR", "Entrar no VR", "Entrar em VR"),
+        "Игры" to arrayOf("Games", "Jogos", "Jogos"),
+        "Установка" to arrayOf("Install", "Instalação", "Instalação"),
+        "Установить игру из файла" to arrayOf("Install a game from a file", "Instalar jogo de um arquivo", "Instalar jogo a partir de ficheiro"),
+        "Магазин игр" to arrayOf("Game store", "Loja de jogos", "Loja de jogos"),
+        "Трекинг" to arrayOf("Tracking", "Rastreamento", "Rastreio"),
+        "Остановить трекинг" to arrayOf("Stop tracking", "Parar rastreamento", "Parar rastreio"),
+        "Управление" to arrayOf("Controls", "Controles", "Controlos"),
+        "Управление и Joy‑Con" to arrayOf("Controls and Joy‑Con", "Controles e Joy‑Con", "Controlos e Joy‑Con"),
+        "Joy‑Con через камеру" to arrayOf("Joy‑Con via camera", "Joy‑Con pela câmera", "Joy‑Con pela câmara"),
+        "Проверка" to arrayOf("Checks", "Verificação", "Verificação"),
+        "Проверить гироскоп Joy‑Con" to arrayOf("Test Joy‑Con gyro", "Testar giroscópio do Joy‑Con", "Testar giroscópio do Joy‑Con"),
+        "Аккаунт" to arrayOf("Account", "Conta", "Conta"),
+        "Войти" to arrayOf("Sign in", "Entrar", "Iniciar sessão"),
+        "Выйти" to arrayOf("Sign out", "Sair", "Terminar sessão"),
+        "Язык" to arrayOf("Language", "Idioma", "Idioma"),
+        "Обновление ПО" to arrayOf("Software Update", "Atualização de Software", "Atualização de software"),
+        "О приложении" to arrayOf("About", "Sobre", "Acerca de"),
+        "Сервер" to arrayOf("Server", "Servidor", "Servidor"),
+        "Обновить" to arrayOf("Refresh", "Atualizar", "Atualizar"),
+        "Обновление…" to arrayOf("Refreshing…", "Atualizando…", "A atualizar…"),
+        "Загрузить" to arrayOf("Get", "Obter", "Obter"),
+        "Скачать" to arrayOf("Download", "Baixar", "Transferir"),
+        "Играть" to arrayOf("Play", "Jogar", "Jogar"),
+        "Открыть" to arrayOf("Open", "Abrir", "Abrir"),
+        "Получить" to arrayOf("Get", "Obter", "Obter"),
+        "Удалить" to arrayOf("Remove", "Remover", "Remover"),
+        "Добавить" to arrayOf("Add", "Adicionar", "Adicionar"),
+        "Закрыть" to arrayOf("Close", "Fechar", "Fechar"),
+        "Готово" to arrayOf("Done", "Concluído", "Concluído"),
+        "Отмена" to arrayOf("Cancel", "Cancelar", "Cancelar"),
+        "Позже" to arrayOf("Later", "Depois", "Mais tarde"),
+        "Подробнее" to arrayOf("Details", "Detalhes", "Detalhes"),
+        "Пропустить" to arrayOf("Skip", "Pular", "Saltar"),
+        "Продолжить" to arrayOf("Continue", "Continuar", "Continuar"),
+        "Не получилось" to arrayOf("Something went wrong", "Não deu certo", "Não foi possível"),
+        "VR‑режимы" to arrayOf("VR modes", "Modos VR", "Modos VR"),
+        "Приложения PhoneXR" to arrayOf("PhoneXR apps", "Apps PhoneXR", "Apps PhoneXR"),
+        "Android‑приложения" to arrayOf("Android apps", "Apps Android", "Apps Android"),
+        "Веб‑приложения" to arrayOf("Web apps", "Apps web", "Apps web"),
+        "Пока пусто" to arrayOf("Nothing here yet", "Nada aqui ainda", "Ainda vazio"),
+        "Загрузка…" to arrayOf("Loading…", "Carregando…", "A carregar…"),
+        // VR home
+        "Браузер" to arrayOf("Browser", "Navegador", "Navegador"),
+        "Фото" to arrayOf("Photos", "Fotos", "Fotografias"),
+        "Звонки" to arrayOf("Calls", "Chamadas", "Chamadas"),
+        "Главная" to arrayOf("Home", "Início", "Início"),
+        "Снять фото" to arrayOf("Take photo", "Tirar foto", "Tirar fotografia"),
+        "Выровнять" to arrayOf("Recenter", "Recentralizar", "Recentrar"),
+        "Граница" to arrayOf("Boundary", "Limite", "Limite"),
+        "Выйти из VR" to arrayOf("Exit VR", "Sair do VR", "Sair de VR"),
+        "Настроить" to arrayOf("Customize", "Personalizar", "Personalizar"),
+        "Светлые" to arrayOf("Light", "Claro", "Claro"),
+        "Тёмные" to arrayOf("Dark", "Escuro", "Escuro"),
+        "О гарнитуре" to arrayOf("About headset", "Sobre o headset", "Sobre o headset"),
+        "Лицо" to arrayOf("Persona", "Persona", "Persona"),
+        "Добавить лицо" to arrayOf("Add Persona", "Adicionar Persona", "Adicionar Persona"),
+        "Показать лицо" to arrayOf("Show Persona", "Mostrar Persona", "Mostrar Persona"),
+        "Настроить границу" to arrayOf("Set up boundary", "Configurar limite", "Configurar limite"),
+        "Удалить границу" to arrayOf("Remove boundary", "Remover limite", "Remover limite"),
+        "Автообновление" to arrayOf("Automatic Updates", "Atualizações Automáticas", "Atualizações automáticas"),
+        "Бета‑обновления" to arrayOf("Beta Updates", "Atualizações Beta", "Atualizações beta"),
+        "Обновить сейчас" to arrayOf("Update Now", "Atualizar Agora", "Atualizar agora"),
+        "Установлена последняя версия" to arrayOf("PhoneXR is up to date", "O PhoneXR está atualizado", "O PhoneXR está atualizado"),
+        // Calls and friends
+        "Позвонить" to arrayOf("Call", "Ligar", "Ligar"),
+        "Принять" to arrayOf("Accept", "Aceitar", "Aceitar"),
+        "Отклонить" to arrayOf("Decline", "Recusar", "Recusar"),
+        "Завершить" to arrayOf("End", "Encerrar", "Terminar"),
+        "Микрофон" to arrayOf("Mute", "Microfone", "Microfone"),
+        "Отменить" to arrayOf("Cancel", "Cancelar", "Cancelar"),
+        "В сети" to arrayOf("Online", "Online", "Online"),
+        "Не в сети" to arrayOf("Offline", "Offline", "Offline"),
+        "Мои друзья" to arrayOf("My friends", "Meus amigos", "Os meus amigos"),
+        "Добавили вас" to arrayOf("Added you", "Adicionaram você", "Adicionaram-no"),
+        "Найти по юзернейму" to arrayOf("Find by username", "Buscar por usuário", "Procurar por utilizador"),
+        "Сейчас никого нет в сети" to arrayOf("Nobody is online", "Ninguém online agora", "Ninguém online agora"),
+        // Elix
+        "Спросите Elix" to arrayOf("Ask Elix", "Pergunte à Elix", "Pergunte à Elix"),
+        "Слушаю…" to arrayOf("Listening…", "Ouvindo…", "A ouvir…"),
+        "Думаю…" to arrayOf("Thinking…", "Pensando…", "A pensar…"),
+        "Говорить" to arrayOf("Speak", "Falar", "Falar"),
+        "Клавиатура" to arrayOf("Keyboard", "Teclado", "Teclado"),
+        "Отправить" to arrayOf("Send", "Enviar", "Enviar"),
+        "Новый разговор" to arrayOf("New chat", "Nova conversa", "Nova conversa"),
+    )
+}
+
+/** The chosen language's text for a Russian UI string. */
+fun tr(ru: String) = L10n.tr(ru)

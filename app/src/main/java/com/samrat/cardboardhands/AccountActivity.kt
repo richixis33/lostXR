@@ -70,14 +70,14 @@ class AccountActivity : ComponentActivity() {
 
     @Composable
     private fun Screen() {
-        HigPage(title = "Аккаунт", onBack = ::finish) {
+        HigPage(title = tr("Аккаунт"), onBack = ::finish) {
             val current = user
             if (current != null) {
                 HigSection(footer = "С аккаунтом вы видны друзьям в приложении «Звонки» в шлеме и можете звонить им персоной.") {
                     HigRow(current.name, current.email)
                 }
                 HigSection {
-                    HigLink("Выйти") {
+                    HigLink(tr("Выйти")) {
                         Account.signOut(this@AccountActivity)
                         Calls.stop()
                         user = null
@@ -100,7 +100,7 @@ class AccountActivity : ComponentActivity() {
                     contentAlignment = Alignment.Center
                 ) {
                     if (busy) CupertinoActivityIndicator()
-                    else CupertinoText(if (creating) "Создать аккаунт" else "Войти", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    else CupertinoText(if (creating) "Создать аккаунт" else tr("Войти"), color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
                 CupertinoText(
                     if (creating) "Уже есть аккаунт? Войти" else "Нет аккаунта? Создать",

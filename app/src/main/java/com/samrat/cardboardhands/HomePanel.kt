@@ -18,13 +18,16 @@ import android.text.TextUtils
  * Everything is drawn into one transparent bitmap that the VR scene places in front of the user.
  */
 class HomePanel {
-    enum class Mode { HOME, STORE, MENU }
+    enum class Mode { HOME, STORE, MENU, CUSTOMIZE }
 
     data class Entry(val id: String, val label: String, val icon: Drawable?, val badge: String? = null)
 
     sealed class Target {
         data class App(val entry: Entry) : Target()
         data class Page(val index: Int) : Target()
+        /** Customize: light or dark icons. */
+        data class Theme(val dark: Boolean) : Target()
+        object Close : Target()
     }
 
     val bitmap: Bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
@@ -56,12 +59,22 @@ class HomePanel {
     fun setStore(entries: List<Entry>) { store = entries }
     fun setMenu(entries: List<Entry>) { menu = entries }
     fun setDock(entries: List<Entry>) { dock = entries }
+
+    private var previewLight: Drawable? = null
+    private var previewDark: Drawable? = null
+    private var darkIcons = false
+
+    /** The customize card: a sample icon in both styles and which one is on. */
+    fun setCustomize(light: Drawable?, dark: Drawable?, isDark: Boolean) {
+        previewLight = light; previewDark = dark; darkIcons = isDark
+    }
     fun homeIcons(): Map<String, Drawable?> = home.associate { it.id to it.icon }
 
     private fun current() = when (mode) {
         Mode.HOME -> home
         Mode.STORE -> store
         Mode.MENU -> menu
+        Mode.CUSTOMIZE -> home
     }
 
     private fun pages(list: List<Entry>) = maxOf(1, (list.size + PER_PAGE - 1) / PER_PAGE)
@@ -86,7 +99,8 @@ class HomePanel {
         val list = current()
         when (mode) {
             Mode.STORE -> canvas.drawText("Магазин веб‑приложений", WIDTH / 2f, 70f, heading)
-            Mode.MENU -> canvas.drawText("Меню", WIDTH / 2f, 70f, heading)
+            Mode.MENU -> canvas.drawText(tr("Меню"), WIDTH / 2f, 70f, heading)
+            Mode.CUSTOMIZE -> Unit
             Mode.HOME -> Unit
         }
         // Honeycomb rows like visionOS: 4, 5, 4 icons.
@@ -163,6 +177,66 @@ class HomePanel {
                 areas += RectF(x - 22f, HEIGHT - 80f, x + 22f, HEIGHT - 20f) to target
             }
         }
+        if (mode == Mode.CUSTOMIZE) drawCustomize(hovered)
+    }
+
+    /** Like the iOS "Customize" card: a sun, the title, and the two icon styles to pick from. */
+    private fun drawCustomize(hovered: Target?) {
+        areas.clear()
+        fill.color = Color.argb(110, 0, 0, 0)
+        canvas.drawRect(0f, 0f, WIDTH.toFloat(), HEIGHT.toFloat(), fill)
+        val card = RectF(WIDTH / 2f - 520f, 330f, WIDTH / 2f + 520f, 900f)
+        canvas.drawRoundRect(card, 80f, 80f, shadow)
+        fill.shader = android.graphics.LinearGradient(0f, card.top, 0f, card.bottom,
+            Color.argb(235, 92, 136, 150), Color.argb(235, 52, 84, 120), android.graphics.Shader.TileMode.CLAMP)
+        canvas.drawRoundRect(card, 80f, 80f, fill)
+        fill.shader = null
+        // Sun: brightness / appearance.
+        fill.color = Color.WHITE
+        val sx = card.left + 90f; val sy = card.top + 85f
+        canvas.drawCircle(sx, sy, 16f, fill)
+        fill.strokeWidth = 7f
+        fill.strokeCap = Paint.Cap.ROUND
+        for (k in 0 until 8) {
+            val a = k * Math.PI / 4
+            canvas.drawLine(sx + (Math.cos(a) * 26).toFloat(), sy + (Math.sin(a) * 26).toFloat(),
+                sx + (Math.cos(a) * 36).toFloat(), sy + (Math.sin(a) * 36).toFloat(), fill)
+        }
+        canvas.drawText(tr("Настроить"), WIDTH / 2f, card.top + 100f, heading)
+        for ((index, dark) in listOf(false, true).withIndex()) {
+            val cx = WIDTH / 2f + (index - .5f) * 380f
+            val icon = RectF(cx - 110f, card.top + 170f, cx + 110f, card.top + 390f)
+            val target = Target.Theme(dark)
+            if (target == hovered) {
+                fill.color = Color.argb(60, 255, 255, 255)
+                canvas.drawRoundRect(RectF(icon.left - 18f, icon.top - 18f, icon.right + 18f, icon.bottom + 18f), 70f, 70f, fill)
+            }
+            canvas.save()
+            canvas.clipPath(Path().apply { addRoundRect(icon, 56f, 56f, Path.Direction.CW) })
+            val drawable = if (dark) previewDark else previewLight
+            if (drawable != null) {
+                drawable.setBounds(icon.left.toInt(), icon.top.toInt(), icon.right.toInt(), icon.bottom.toInt())
+                drawable.draw(canvas)
+            } else {
+                fill.color = if (dark) Color.rgb(28, 28, 32) else Color.rgb(230, 232, 236)
+                canvas.drawRect(icon, fill)
+            }
+            canvas.restore()
+            val selected = dark == darkIcons
+            val title = if (dark) tr("Тёмные") else tr("Светлые")
+            if (selected) {
+                fill.color = Color.argb(70, 255, 255, 255)
+                val w = label.measureText(title) / 2 + 36f
+                canvas.drawRoundRect(RectF(cx - w, icon.bottom + 40f, cx + w, icon.bottom + 100f), 30f, 30f, fill)
+            }
+            canvas.drawText(title, cx, icon.bottom + 81f, label)
+            areas += RectF(icon.left - 30f, icon.top - 30f, icon.right + 30f, icon.bottom + 110f) to target
+        }
+        // Anywhere outside the card closes it.
+        areas += RectF(0f, 0f, WIDTH.toFloat(), card.top) to Target.Close
+        areas += RectF(0f, card.bottom, WIDTH.toFloat(), HEIGHT.toFloat()) to Target.Close
+        areas += RectF(0f, 0f, card.left, HEIGHT.toFloat()) to Target.Close
+        areas += RectF(card.right, 0f, WIDTH.toFloat(), HEIGHT.toFloat()) to Target.Close
     }
 
     companion object {

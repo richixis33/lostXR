@@ -105,6 +105,29 @@ class CinemaActivity : Activity(), LifecycleOwner {
                 if (id >= 0) runCatching { service?.injectMotion(event, id) }
             },
         )
+        // Minecraft VR: head turns the game's camera, gestures play (see CinemaHands.minecraft).
+        val minecraft = intent.getStringExtra(EXTRA_PACKAGE) == "com.mojang.minecraftpe"
+        hands?.minecraft = minecraft
+        renderer.headLocked = minecraft
+        if (minecraft) thread(name = "PhoneXR Minecraft look") {
+            val head = FloatArray(16)
+            var lastYaw = Float.NaN
+            var lastPitch = 0f
+            while (running) {
+                tracker.copyHead(head)
+                val yaw = Math.toDegrees(kotlin.math.atan2(head[8], head[10]).toDouble()).toFloat()
+                val pitch = Math.toDegrees(kotlin.math.asin((-head[9]).coerceIn(-1f, 1f).toDouble())).toFloat()
+                if (!lastYaw.isNaN() && displayId >= 0) {
+                    var dy = yaw - lastYaw
+                    if (dy > 180f) dy -= 360f
+                    if (dy < -180f) dy += 360f
+                    hands?.look(dy, pitch - lastPitch)
+                }
+                lastYaw = yaw
+                lastPitch = pitch
+                Thread.sleep(16)
+            }
+        }
         trackingExecutor.execute {
             handTracker = runCatching { HandTracker(this, useGpu = true) { hands?.onResult(it) } }
                 .getOrElse { HandTracker(this, useGpu = false) { hands?.onResult(it) } }
