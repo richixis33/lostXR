@@ -41,8 +41,17 @@ class CinemaRenderer(
         handFrame?.recycle()
         handFrame = bitmap
     }
-    /** Minecraft VR: the screen stays in front of the eyes, the head turns the game's camera instead. */
-    @Volatile var headLocked = false
+    /**
+     * Full view (Minecraft): no room, the app's screen fills each eye exactly (the virtual screen is
+     * made the eye's size), with the hands and their cursors on top.
+     */
+    @Volatile var fullscreen = false
+    /** The app's virtual screen size; set before the GL surface is created. */
+    var screenW = SCREEN_PIXELS_W
+    var screenH = SCREEN_PIXELS_H
+    /** Hands for the full view: triangles (x, y, z) in the eye's own coordinates (-1..1). */
+    @Volatile var viewHands: List<FloatArray> = emptyList()
+    private var flatProgram = 0
     /** Where the screen is, for hit tests from the hand thread (centre y, z, width). */
     val screenPlacement: FloatArray get() = if (model != null) floatArrayOf(model.screenCenterY, model.screenZ, model.screenWidth, model.eyeHeight)
         else floatArrayOf(SCREEN_CENTER_Y, SCREEN_Z, SCREEN_WIDTH, EYE_HEIGHT)
@@ -76,6 +85,7 @@ class CinemaRenderer(
         screenProgram = program(SCREEN_VERTEX, SCREEN_FRAGMENT)
         cursorProgram = program(SCREEN_VERTEX, CURSOR_FRAGMENT)
         ghostProgram = program(SCREEN_VERTEX, HAND_FRAGMENT)
+        flatProgram = program(GHOST_VERTEX, FLAT_FRAGMENT)
         handTexture = IntArray(1).also { GLES20.glGenTextures(1, it, 0) }[0]
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, handTexture)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
@@ -89,7 +99,7 @@ class CinemaRenderer(
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         val texture = SurfaceTexture(screenTexture).apply {
-            setDefaultBufferSize(SCREEN_PIXELS_W, SCREEN_PIXELS_H)
+            setDefaultBufferSize(screenW, screenH)
             setOnFrameAvailableListener { frameReady.set(true) }
         }
         surfaceTexture = texture
@@ -115,6 +125,7 @@ class CinemaRenderer(
                 else -> buildRoom()
             }
         }
+        if (fullscreen) { drawFullView(); return }
         val sky = scene == Scene.SKY
         val clear = model?.clearColor ?: if (sky) floatArrayOf(.55f, .75f, .98f) else floatArrayOf(.05f, .04f, .04f)
         GLES20.glClearColor(clear[0], clear[1], clear[2], 1f)
@@ -136,15 +147,87 @@ class CinemaRenderer(
             Matrix.multiplyMM(view, 0, eye, 0, worldToHead, 0)
             Matrix.multiplyMM(viewProjection, 0, projection, 0, view, 0)
             if (model != null) model.draw(viewProjection) else sceneMesh?.draw(colorProgram, viewProjection)
-            if (headLocked) {
-                val eyeOnly = FloatArray(16)
-                Matrix.multiplyMM(eyeOnly, 0, projection, 0, eye, 0)
+            drawScreen(viewProjection, place[2], place[0], place[1])
+            drawCursors(viewProjection, place[2], place[0], place[1])
+        }
+    }
+
+    /** Width / height of one eye's view, for the hands' mapping. */
+    @Volatile var eyeAspect = .8f
+        private set
+
+    private fun drawFullView() {
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glViewport(0, 0, width, height)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+        val eyeWidth = width / 2
+        eyeAspect = eyeWidth.toFloat() / height
+        val identity = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+        for (index in 0..1) {
+            GLES20.glViewport(index * eyeWidth, 0, eyeWidth, height)
+            GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+            // The app's screen is exactly the eye's size: it fills the view, nothing cut off.
+            GLES20.glUseProgram(screenProgram)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, screenTexture)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(screenProgram, "uTexture"), 0)
+            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(screenProgram, "uMvp"), 1, false, identity, 0)
+            val quad = floatBuffer(floatArrayOf(-1f, -1f, 0f, 0f, 1f, 1f, -1f, 0f, 1f, 1f, -1f, 1f, 0f, 0f, 0f, 1f, 1f, 0f, 1f, 0f))
+            val position = GLES20.glGetAttribLocation(screenProgram, "aPosition")
+            val uv = GLES20.glGetAttribLocation(screenProgram, "aUv")
+            quad.position(0)
+            GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, 20, quad)
+            GLES20.glEnableVertexAttribArray(position)
+            quad.position(3)
+            GLES20.glVertexAttribPointer(uv, 2, GLES20.GL_FLOAT, false, 20, quad)
+            GLES20.glEnableVertexAttribArray(uv)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            // See-through hands: one depth plane + GL_LESS blends each pixel once.
+            val hands = viewHands
+            if (hands.isNotEmpty()) {
                 GLES20.glClear(GLES20.GL_DEPTH_BUFFER_BIT)
-                drawScreen(eyeOnly, HEAD_SCREEN_WIDTH, 0f, -HEAD_SCREEN_DISTANCE)
-            } else {
-                drawScreen(viewProjection, place[2], place[0], place[1])
-                drawCursors(viewProjection, place[2], place[0], place[1])
+                GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+                GLES20.glDepthFunc(GLES20.GL_LESS)
+                GLES20.glEnable(GLES20.GL_BLEND)
+                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                GLES20.glDisable(GLES20.GL_CULL_FACE)
+                GLES20.glUseProgram(flatProgram)
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(flatProgram, "uMvp"), 1, false, identity, 0)
+                GLES20.glUniform4f(GLES20.glGetUniformLocation(flatProgram, "uColor"), .93f, .95f, 1f, .35f)
+                val flat = GLES20.glGetAttribLocation(flatProgram, "aPosition")
+                for (mesh in hands) {
+                    val buffer = floatBuffer(mesh)
+                    GLES20.glVertexAttribPointer(flat, 3, GLES20.GL_FLOAT, false, 12, buffer)
+                    GLES20.glEnableVertexAttribArray(flat)
+                    GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, mesh.size / 3)
+                }
+                GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+                GLES20.glEnable(GLES20.GL_CULL_FACE)
             }
+            // Cursors: a ring on each hand's point, filled while tapping.
+            val list = cursors
+            if (list.isNotEmpty()) {
+                GLES20.glEnable(GLES20.GL_BLEND)
+                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                GLES20.glUseProgram(cursorProgram)
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(cursorProgram, "uMvp"), 1, false, identity, 0)
+                val rx = .045f; val ry = rx * eyeAspect
+                for (cursor in list) {
+                    val x = cursor.u * 2f - 1f; val y = 1f - cursor.v * 2f
+                    GLES20.glUniform1f(GLES20.glGetUniformLocation(cursorProgram, "uPressed"), if (cursor.pressed) 1f else 0f)
+                    val ring = floatBuffer(floatArrayOf(x - rx, y - ry, 0f, 0f, 1f, x + rx, y - ry, 0f, 1f, 1f, x - rx, y + ry, 0f, 0f, 0f, x + rx, y + ry, 0f, 1f, 0f))
+                    val p = GLES20.glGetAttribLocation(cursorProgram, "aPosition")
+                    val t = GLES20.glGetAttribLocation(cursorProgram, "aUv")
+                    ring.position(0)
+                    GLES20.glVertexAttribPointer(p, 3, GLES20.GL_FLOAT, false, 20, ring)
+                    GLES20.glEnableVertexAttribArray(p)
+                    ring.position(3)
+                    GLES20.glVertexAttribPointer(t, 2, GLES20.GL_FLOAT, false, 20, ring)
+                    GLES20.glEnableVertexAttribArray(t)
+                    GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+                }
+            }
+            GLES20.glDisable(GLES20.GL_BLEND)
         }
     }
 
@@ -155,7 +238,7 @@ class CinemaRenderer(
         GLES20.glUniform1i(GLES20.glGetUniformLocation(screenProgram, "uTexture"), 0)
         GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(screenProgram, "uMvp"), 1, false, mvp, 0)
         val halfW = screenWidth / 2
-        val halfH = screenWidth * SCREEN_PIXELS_H / SCREEN_PIXELS_W / 2
+        val halfH = screenWidth * screenH / screenW / 2
         // x, y, z, u, v; a virtual display's picture has t = 0 at the top.
         val quad = floatArrayOf(
             -halfW, cy - halfH, z, 0f, 1f,
@@ -184,7 +267,7 @@ class CinemaRenderer(
         GLES20.glUseProgram(cursorProgram)
         GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(cursorProgram, "uMvp"), 1, false, mvp, 0)
         val halfW = screenWidth / 2
-        val halfH = screenWidth * SCREEN_PIXELS_H / SCREEN_PIXELS_W / 2
+        val halfH = screenWidth * screenH / screenW / 2
         val r = screenWidth * .018f
         for (cursor in list) {
             val x = -halfW + cursor.u * screenWidth
@@ -431,6 +514,10 @@ class CinemaRenderer(
             uniform mat4 uMvp;
             attribute vec3 aPosition;
             void main() { gl_Position = uMvp * vec4(aPosition, 1.0); }"""
+        private const val FLAT_FRAGMENT = """
+            precision mediump float;
+            uniform vec4 uColor;
+            void main() { gl_FragColor = uColor; }"""
         private const val HAND_FRAGMENT = """
             precision mediump float;
             uniform sampler2D uTexture;

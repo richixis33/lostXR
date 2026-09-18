@@ -78,6 +78,14 @@ class CinemaActivity : Activity(), LifecycleOwner {
             surface = created
             startDisplay()
         })
+        // Minecraft fills the whole view: its virtual screen is exactly one eye's size.
+        if (intent.getStringExtra(EXTRA_PACKAGE) == "com.mojang.minecraftpe") {
+            val metrics = resources.displayMetrics
+            val longSide = maxOf(metrics.widthPixels, metrics.heightPixels)
+            val shortSide = minOf(metrics.widthPixels, metrics.heightPixels)
+            renderer.screenW = longSide / 2
+            renderer.screenH = shortSide
+        }
         tracker = HeadTracker(getSystemService(SensorManager::class.java)) { display }
         renderer.head = tracker.head
         renderer.scene = if (sceneName == SCENE_ROOM) CinemaRenderer.Scene.ROOM else CinemaRenderer.Scene.SKY
@@ -108,8 +116,10 @@ class CinemaActivity : Activity(), LifecycleOwner {
         // Minecraft VR: head turns the game's camera, gestures play (see CinemaHands.minecraft).
         val minecraft = intent.getStringExtra(EXTRA_PACKAGE) == "com.mojang.minecraftpe"
         hands?.minecraft = minecraft
-        hands?.mask = HandProfile.mask(this)
-        renderer.headLocked = minecraft
+        renderer.fullscreen = minecraft
+        hands?.screenWidth = renderer.screenW
+        hands?.screenHeight = renderer.screenH
+        hands?.onViewHands = { renderer.viewHands = it }
         if (minecraft) {
             MinecraftBridge.start()
             hands?.onConnectGesture = { typeConnect() }
@@ -126,12 +136,8 @@ class CinemaActivity : Activity(), LifecycleOwner {
                 // With the mod linked, the head and hands go to it; otherwise the touch controls drive the camera.
                 if (MinecraftBridge.connected) {
                     if (++bridgeTick % 3 == 0) hands?.let { MinecraftBridge.sendPose(yaw, pitch, it.bridgeHands) }
-                } else if (!lastYaw.isNaN() && displayId >= 0) {
-                    var dy = yaw - lastYaw
-                    if (dy > 180f) dy -= 360f
-                    if (dy < -180f) dy += 360f
-                    hands?.look(dy, pitch - lastPitch)
                 }
+                hands?.cameraToView = (4f / 3f) / renderer.eyeAspect
                 lastYaw = yaw
                 lastPitch = pitch
                 Thread.sleep(16)
@@ -220,7 +226,7 @@ class CinemaActivity : Activity(), LifecycleOwner {
         thread(name = "PhoneXR cinema start") {
             val metrics = resources.displayMetrics
             val id = runCatching {
-                shell.createDisplay(target, CinemaRenderer.SCREEN_PIXELS_W, CinemaRenderer.SCREEN_PIXELS_H, 320)
+                shell.createDisplay(target, renderer.screenW, renderer.screenH, if (renderer.fullscreen) 280 else 320)
             }.getOrDefault(-1)
             if (id < 0) {
                 toast("Не удалось создать экран кинотеатра")

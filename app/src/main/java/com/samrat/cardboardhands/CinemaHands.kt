@@ -31,47 +31,23 @@ class CinemaHands(
     }
 
     /**
-     * Minecraft VR controls instead of cursors: the head turns the camera, a "finger gun" walks
-     * forward, a fist breaks and hits, a pinch places and uses. Bedrock has no VR hands of its own,
-     * so the gestures press its touch controls (turn on "Split controls" in Minecraft's settings).
+     * Minecraft: the game fills the whole view, each hand is a cursor on it (a pinch taps, in menus
+     * and in the game). With the PhoneXR VR mod linked, the hands and head drive the mod instead.
      */
     @Volatile var minecraft = false
-    /** The hands' cut-out calibration (Settings → Калибровка рук in the VR home). */
-    @Volatile var mask = HandProfile.Mask(1.1f, 0f, 0f)
-    private val touch = MultiTouch(inject)
-    private var lookX = LOOK_START_X
-    private var lookY = LOOK_START_Y
-    private var lookIdleSince = 0L
+    /** Full-view mode: camera picture → view scale (camera aspect / eye aspect), from the renderer. */
+    @Volatile var cameraToView = 4f / 3f / .8f
+    /** Size of the app's virtual screen in pixels, for touches. */
+    @Volatile var screenWidth = CinemaRenderer.SCREEN_PIXELS_W
+    @Volatile var screenHeight = CinemaRenderer.SCREEN_PIXELS_H
 
-    /** Head movement since the last call (degrees): drags the camera. */
-    fun look(deltaYaw: Float, deltaPitch: Float) {
-        if (!minecraft) return
-        val now = SystemClock.uptimeMillis()
-        if (kotlin.math.abs(deltaYaw) + kotlin.math.abs(deltaPitch) < .05f) {
-            if (touch.isDown(LOOK) && now - lookIdleSince > 120) touch.up(LOOK)
-            return
-        }
-        lookIdleSince = now
-        if (!touch.isDown(LOOK)) {
-            lookX = LOOK_START_X; lookY = LOOK_START_Y
-            touch.down(LOOK, lookX, lookY)
-        }
-        lookX -= deltaYaw * PIXELS_PER_DEGREE
-        lookY -= deltaPitch * PIXELS_PER_DEGREE
-        touch.move(LOOK, lookX, lookY)
-        // Near the edge of its area the finger lifts and starts again from the middle.
-        if (kotlin.math.abs(lookX - LOOK_START_X) > 420f || kotlin.math.abs(lookY - LOOK_START_Y) > 300f) touch.up(LOOK)
-    }
-
-    /** One hand's gestures in Minecraft mode. */
-    private fun minecraftGestures(hand: Hand, shape: HandGestures.Shape, points: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>) {
+    /** For the PhoneXR VR mod: where the hand is around the head (metres) and what it does. */
+    private fun bridgeData(hand: Hand, shape: HandGestures.Shape, points: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>, pinching: Boolean) {
         fun d(a: Int, b: Int) = kotlin.math.hypot(points[a].x() - points[b].x(), points[a].y() - points[b].y())
         val indexOut = d(0, 8) > d(0, 6) * 1.12f
         val othersCurled = intArrayOf(12, 16, 20).zip(intArrayOf(10, 14, 18)).all { (tip, pip) -> d(0, tip) < d(0, pip) * 1.05f }
         val thumbOut = d(4, 5) > shape.palmWidth * .55f
         val gun = indexOut && othersCurled && thumbOut
-        val pinching = hand.latch.update(shape)
-        // For the PhoneXR VR mod: where the hand is around the head (metres) and what it does.
         val palm = intArrayOf(0, 5, 9, 17)
         val tx = palm.map { (points[it].x() - .5f) * 2f * TAN_X }.average().toFloat()
         val ty = palm.map { (.5f - points[it].y()) * 2f * TAN_Y }.average().toFloat()
@@ -79,27 +55,10 @@ class CinemaHands(
         val distance = (PALM_WIDTH_M / palmTan.coerceAtLeast(.01f)).coerceIn(.2f, .8f)
         val bits = (if (shape.fist) 1 else 0) or (if (gun) 2 else 0) or (if (pinching) 4 else 0)
         bridgeHands[hand.pointerId] = floatArrayOf(tx * distance, ty * distance, distance, bits.toFloat())
-        // Palm toward the face + pinch: PhoneXR types "/connect" into Minecraft for the mod.
-        if (pinching && !hand.down && shape.palmToFace) { hand.down = true; onConnectGesture(); return }
-        if (MinecraftBridge.connected) {
-            // The mod plays; the touch controls stay off.
-            touch.releaseAll()
-            hand.down = pinching
-            return
-        }
-        val walkId = WALK
-        val mineId = MINE + hand.pointerId
-        val useId = USE + hand.pointerId
-        // Walking belongs to whichever hand makes the gun first.
-        if (gun && !touch.isDown(walkId)) { touch.down(walkId, WALK_X, WALK_Y); walker = hand }
-        if (!gun && walker === hand && touch.isDown(walkId)) { touch.up(walkId); walker = null }
-        if (shape.fist && !touch.isDown(mineId)) touch.down(mineId, MINE_X, MINE_Y)
-        if (!shape.fist && touch.isDown(mineId)) touch.up(mineId)
-        if (pinching && !hand.down) { hand.down = true; touch.down(useId, MINE_X + 40f, MINE_Y); touch.up(useId) }
-        if (!pinching) hand.down = false
     }
 
-    private var walker: Hand? = null
+    /** See-through hands for the full view, in its own coordinates (-1..1), and their cursors. */
+    @Volatile var onViewHands: (List<FloatArray>) -> Unit = {}
 
     /** Latest hands for the Minecraft mod: [x, y, z, bits] per hand (left, right), null when unseen. */
     val bridgeHands = arrayOfNulls<FloatArray>(2)
@@ -119,6 +78,7 @@ class CinemaHands(
         hands.values.forEach { it.seen = false }
         val cursors = ArrayList<CinemaRenderer.Cursor>(2)
         val ghosts = ArrayList<FloatArray>(2)
+        val viewHands = ArrayList<FloatArray>(2)
 
         result.landmarks().forEachIndexed { index, points ->
             if (points.size < 21) return@forEachIndexed
@@ -128,17 +88,36 @@ class CinemaHands(
             val shape = HandGestures.shape(points, physicalLeft)
             if (minecraft) {
                 hand.seen = true
-                minecraftGestures(hand, shape, points)
+                val pinching = hand.latch.update(shape)
+                bridgeData(hand, shape, points, pinching)
+                // The hand drawn over the game where it really is.
+                viewHands += GhostHand.triangles(
+                    FloatArray(21) { (points[it].x() - .5f) * cameraToView * 2f },
+                    FloatArray(21) { (.5f - points[it].y()) * 2f },
+                    0f,
+                )
+                val x = (hand.filterX.filter(shape.aimX, now) - .5f) * cameraToView + .5f
+                val y = hand.filterY.filter(shape.aimY, now)
+                hand.u = x.coerceIn(0f, 1f)
+                hand.v = y.coerceIn(0f, 1f)
+                // Palm toward the face + pinch: PhoneXR types "/connect" into Minecraft for the mod.
+                if (pinching && !hand.down && shape.palmToFace && !MinecraftBridge.connected) {
+                    hand.down = true
+                    onConnectGesture()
+                    return@forEachIndexed
+                }
+                if (MinecraftBridge.connected) {
+                    // The mod plays with the hands; no taps on the screen.
+                    if (hand.down) release(hand)
+                    cursors += CinemaRenderer.Cursor(hand.u, hand.v, pinching)
+                    return@forEachIndexed
+                }
+                val onScreen = x in 0f..1f && y in 0f..1f
+                val pressed = pinching && (hand.down || onScreen)
+                cursors += CinemaRenderer.Cursor(hand.u, hand.v, pressed)
+                if (pressed != hand.down) { if (pressed) press(hand) else release(hand) }
+                return@forEachIndexed
             }
-            // The real hand from the camera, over everything (x, y, z, u, v per vertex).
-            ghosts += RealHand.mesh(
-                FloatArray(21) { points[it].x() },
-                FloatArray(21) { points[it].y() },
-                { u, v -> floatArrayOf((u - .5f) * 2f * TAN_X + mask.dx, (.5f - v) * 2f * TAN_Y + mask.dy) },
-                { u, v -> floatArrayOf(u, v) },
-                mask.grow,
-            )
-            if (minecraft) return@forEachIndexed
             val x = hand.filterX.filter(shape.aimX, now)
             val y = hand.filterY.filter(shape.aimY, now)
             val hit = screenPoint(x, y, head, place) ?: return@forEachIndexed
@@ -157,13 +136,7 @@ class CinemaHands(
         }
         // A hand that left the camera lets go of the screen.
         for (hand in hands.values) {
-            if (!hand.seen && minecraft) {
-                bridgeHands[hand.pointerId] = null
-                touch.up(MINE + hand.pointerId)
-                if (walker === hand) { touch.up(WALK); walker = null }
-                hand.down = false
-                continue
-            }
+            if (!hand.seen && minecraft) bridgeHands[hand.pointerId] = null
             if (!hand.seen) {
                 hand.filterX.reset(); hand.filterY.reset(); hand.latch.reset()
                 if (hand.down) release(hand)
@@ -172,14 +145,15 @@ class CinemaHands(
         if (hands.values.any { it.down }) send(MotionEvent.ACTION_MOVE, null)
         onCursors(cursors)
         onGhosts(ghosts)
+        onViewHands(viewHands)
     }
 
     /** Lets go of everything, e.g. when the cinema pauses. */
     fun releaseAll() {
-        touch.releaseAll()
         for (hand in hands.values) if (hand.down) release(hand)
         onCursors(emptyList())
         onGhosts(emptyList())
+        onViewHands(emptyList())
     }
 
     /** Where the hand's aim ray from the eyes meets the screen, as screen u, v (may be outside 0..1). */
@@ -222,8 +196,8 @@ class CinemaHands(
         }
         val coords = Array(active.size) { i ->
             MotionEvent.PointerCoords().apply {
-                x = active[i].u * CinemaRenderer.SCREEN_PIXELS_W
-                y = active[i].v * CinemaRenderer.SCREEN_PIXELS_H
+                x = active[i].u * screenWidth
+                y = active[i].v * screenHeight
                 pressure = 1f
                 size = 1f
             }
@@ -245,68 +219,9 @@ class CinemaHands(
          * the whole screen is covered without stretching the arms (4:3 analysis frames).
          */
         const val TAN_X = .95f
-        // Minecraft touch layout on the 1920 × 1080 virtual screen (Bedrock's default controls).
-        const val LOOK = 10
-        const val WALK = 11
-        const val MINE = 12
-        const val USE = 14
-        const val LOOK_START_X = 1340f
-        const val LOOK_START_Y = 460f
-        const val WALK_X = 240f
-        const val WALK_Y = 720f
-        const val MINE_X = 1100f
-        const val MINE_Y = 620f
-        const val PIXELS_PER_DEGREE = 12f
         /** A grown-up palm is about this wide: its size in the picture gives the hand's distance. */
         const val PALM_WIDTH_M = .08f
         const val TAN_Y = .72f
     }
 }
 
-/** Several fingers on the virtual screen at once, each with its own id, sent as real multi-touch. */
-class MultiTouch(private val inject: (MotionEvent) -> Unit) {
-    private val points = LinkedHashMap<Int, FloatArray>()
-    private var downTime = 0L
-
-    @Synchronized fun isDown(id: Int) = points.containsKey(id)
-
-    @Synchronized
-    fun down(id: Int, x: Float, y: Float) {
-        if (points.containsKey(id)) return
-        val first = points.isEmpty()
-        points[id] = floatArrayOf(x, y)
-        if (first) downTime = SystemClock.uptimeMillis()
-        send(if (first) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_POINTER_DOWN, id)
-    }
-
-    @Synchronized
-    fun move(id: Int, x: Float, y: Float) {
-        val point = points[id] ?: return
-        point[0] = x; point[1] = y
-        send(MotionEvent.ACTION_MOVE, null)
-    }
-
-    @Synchronized
-    fun up(id: Int) {
-        if (!points.containsKey(id)) return
-        send(if (points.size == 1) MotionEvent.ACTION_UP else MotionEvent.ACTION_POINTER_UP, id)
-        points.remove(id)
-    }
-
-    @Synchronized
-    fun releaseAll() = points.keys.toList().forEach { up(it) }
-
-    private fun send(action: Int, actor: Int?) {
-        val ids = points.keys.toList()
-        val properties = Array(ids.size) { i -> MotionEvent.PointerProperties().apply { id = ids[i]; toolType = MotionEvent.TOOL_TYPE_FINGER } }
-        val coords = Array(ids.size) { i ->
-            MotionEvent.PointerCoords().apply { x = points.getValue(ids[i])[0]; y = points.getValue(ids[i])[1]; pressure = 1f; size = 1f }
-        }
-        val masked = if (actor != null && (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP))
-            action or (ids.indexOf(actor) shl MotionEvent.ACTION_POINTER_INDEX_SHIFT) else action
-        val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), masked, ids.size, properties, coords,
-            0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
-        inject(event)
-        event.recycle()
-    }
-}
