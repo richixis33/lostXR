@@ -108,6 +108,7 @@ class CinemaActivity : Activity(), LifecycleOwner {
         // Minecraft VR: head turns the game's camera, gestures play (see CinemaHands.minecraft).
         val minecraft = intent.getStringExtra(EXTRA_PACKAGE) == "com.mojang.minecraftpe"
         hands?.minecraft = minecraft
+        hands?.mask = HandProfile.mask(this)
         renderer.headLocked = minecraft
         if (minecraft) thread(name = "PhoneXR Minecraft look") {
             val head = FloatArray(16)

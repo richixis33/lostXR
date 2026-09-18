@@ -103,8 +103,8 @@ object RealHand {
      * caller maps from; [position] turns such a point into head space (z = -1), [uv] into the
      * camera texture's coordinates.
      */
-    fun mesh(us: FloatArray, vs: FloatArray, position: (Float, Float) -> FloatArray, uv: (Float, Float) -> FloatArray): FloatArray {
-        val flat = GhostHand.triangles(us, vs, 0f, null, GROW)
+    fun mesh(us: FloatArray, vs: FloatArray, position: (Float, Float) -> FloatArray, uv: (Float, Float) -> FloatArray, grow: Float = GROW): FloatArray {
+        val flat = GhostHand.triangles(us, vs, 0f, null, grow)
         val out = FloatArray(flat.size / 3 * 5)
         var o = 0
         var i = 0

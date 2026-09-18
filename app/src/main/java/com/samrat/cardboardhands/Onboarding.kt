@@ -327,6 +327,25 @@ object HandProfile {
             .putFloat("pinch_close", close).putFloat("pinch_open", (close + .16f).coerceAtMost(.7f)).apply()
     }
 
+    /**
+     * Where hands cut through the VR content: how much wider than the fingers the cut is and how
+     * far it is shifted (head-space tangent units), set in Settings → Калибровка рук.
+     */
+    data class Mask(val grow: Float, val dx: Float, val dy: Float)
+
+    fun mask(context: Context): Mask {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return Mask(prefs.getFloat("mask_grow", 1.1f), prefs.getFloat("mask_dx", 0f), prefs.getFloat("mask_dy", 0f))
+    }
+
+    fun saveMask(context: Context, mask: Mask) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putFloat("mask_grow", mask.grow.coerceIn(.7f, 2f))
+            .putFloat("mask_dx", mask.dx.coerceIn(-.3f, .3f))
+            .putFloat("mask_dy", mask.dy.coerceIn(-.3f, .3f))
+            .apply()
+    }
+
     /** A pinch latch tuned to this user's fingers. */
     fun latch(context: Context): HandGestures.PinchLatch {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

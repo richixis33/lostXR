@@ -36,6 +36,8 @@ class CinemaHands(
      * so the gestures press its touch controls (turn on "Split controls" in Minecraft's settings).
      */
     @Volatile var minecraft = false
+    /** The hands' cut-out calibration (Settings → Калибровка рук in the VR home). */
+    @Volatile var mask = HandProfile.Mask(1.1f, 0f, 0f)
     private val touch = MultiTouch(inject)
     private var lookX = LOOK_START_X
     private var lookY = LOOK_START_Y
@@ -110,8 +112,9 @@ class CinemaHands(
             ghosts += RealHand.mesh(
                 FloatArray(21) { points[it].x() },
                 FloatArray(21) { points[it].y() },
-                { u, v -> floatArrayOf((u - .5f) * 2f * TAN_X, (.5f - v) * 2f * TAN_Y) },
+                { u, v -> floatArrayOf((u - .5f) * 2f * TAN_X + mask.dx, (.5f - v) * 2f * TAN_Y + mask.dy) },
                 { u, v -> floatArrayOf(u, v) },
+                mask.grow,
             )
             if (minecraft) return@forEachIndexed
             val x = hand.filterX.filter(shape.aimX, now)

@@ -103,6 +103,7 @@ object L10n {
         "Показать лицо" to arrayOf("Show Persona", "Mostrar Persona", "Mostrar Persona"),
         "Настроить границу" to arrayOf("Set up boundary", "Configurar limite", "Configurar limite"),
         "Удалить границу" to arrayOf("Remove boundary", "Remover limite", "Remover limite"),
+        "Калибровка рук" to arrayOf("Hand calibration", "Calibração das mãos", "Calibração das mãos"),
         "Автообновление" to arrayOf("Automatic Updates", "Atualizações Automáticas", "Atualizações automáticas"),
         "Бета‑обновления" to arrayOf("Beta Updates", "Atualizações Beta", "Atualizações beta"),
         "Обновить сейчас" to arrayOf("Update Now", "Atualizar Agora", "Atualizar agora"),

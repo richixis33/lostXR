@@ -34,9 +34,12 @@ class SettingsContent(
         fun startBoundary()
         fun clearBoundary()
         fun boundaryText(): String
+        fun handMask(): HandProfile.Mask
+        fun setHandMask(mask: HandProfile.Mask)
+        fun previewHandMask(on: Boolean)
     }
 
-    private enum class Page(val title: String) { ABOUT(tr("О гарнитуре")), UPDATE(tr("Обновление ПО")), FACE(tr("Лицо")), BOUNDARY(tr("Граница")) }
+    private enum class Page(val title: String) { ABOUT(tr("О гарнитуре")), UPDATE(tr("Обновление ПО")), FACE(tr("Лицо")), BOUNDARY(tr("Граница")), HANDS(tr("Калибровка рук")) }
 
     override val pixelWidth = 1600
     override val pixelHeight = 1000
@@ -71,10 +74,31 @@ class SettingsContent(
         if (hit != null) thread { hit(); draw() }
     }
 
-    override fun release() = Unit
+    override fun release() = host.previewHandMask(false)
+
+    /** Fit the hands' cut-out (tinted blue while this page is open) to the real hands. */
+    private fun hands() {
+        text(tr("Калибровка рук"), 480f, 100f, 52f, Color.WHITE, bold = true)
+        wrap("Поднимите руку перед собой. Голубая форма — то, где руки прорезают окна. Подгоните её, " +
+            "чтобы она лежала точно на руке: шире или уже и сдвиг стрелками.", 480f, 170f, 1560f, 34f)
+        val mask = host.handMask()
+        text("Размер ${"%.2f".format(mask.grow)} · сдвиг ${"%.2f".format(mask.dx)}, ${"%.2f".format(mask.dy)}", 480f, 420f, 34f, Color.rgb(170, 170, 178))
+        fun change(grow: Float = 0f, dx: Float = 0f, dy: Float = 0f) =
+            host.setHandMask(HandProfile.Mask(mask.grow + grow, mask.dx + dx, mask.dy + dy))
+        button(RectF(480f, 480f, 760f, 560f), "Уже") { change(grow = -.05f) }
+        button(RectF(790f, 480f, 1070f, 560f), "Шире") { change(grow = .05f) }
+        button(RectF(1180f, 480f, 1300f, 560f), "↑") { change(dy = .01f) }
+        button(RectF(1060f, 590f, 1180f, 670f), "←") { change(dx = -.01f) }
+        button(RectF(1300f, 590f, 1420f, 670f), "→") { change(dx = .01f) }
+        button(RectF(1180f, 700f, 1300f, 780f), "↓") { change(dy = -.01f) }
+        button(RectF(480f, 740f, 800f, 820f), "Сбросить", Color.argb(90, 255, 255, 255)) {
+            host.setHandMask(HandProfile.Mask(1.1f, 0f, 0f))
+        }
+    }
 
     private fun open(target: Page) {
         page = target
+        host.previewHandMask(target == Page.HANDS)
         picking = false
         status = null
         if (target == Page.UPDATE && !checked) checkUpdate()
@@ -195,6 +219,7 @@ class SettingsContent(
             Page.FACE -> face()
             Page.BOUNDARY -> boundary()
             Page.UPDATE -> update()
+            Page.HANDS -> hands()
         }
         fresh = true
     }

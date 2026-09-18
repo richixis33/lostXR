@@ -133,6 +133,10 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     private var onboardingTexture = 0
     /** When the home appeared after setup, for its entrance animation. */
     @Volatile private var appearStart = 0L
+    /** Calibration of the hands' cut-out (Settings → Калибровка рук). */
+    @Volatile private var handMask = HandProfile.Mask(1.1f, 0f, 0f)
+    /** Shows the cut-out tinted while it is being calibrated. */
+    @Volatile private var maskPreview = false
     /** Bone lengths from the setup's hand scan (null before it). */
     private val handProfile by lazy { HandProfile.bones(this) }
     private var wasPinching = false
@@ -214,6 +218,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         CinemaActivity.setJoyConPassthrough(this, false)
         loadApps()
         Calls.localHands = { handPoints }
+        handMask = HandProfile.mask(this)
         Calls.unlisten(callListener)
         Calls.listen(callListener)
         thread(name = "PhoneXR calls start") { Calls.start(this) }
@@ -351,6 +356,15 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             boundary.clear()
             toast("Граница удалена")
         }
+
+        override fun handMask() = this@VrHomeActivity.handMask
+
+        override fun setHandMask(mask: HandProfile.Mask) {
+            HandProfile.saveMask(this@VrHomeActivity, mask)
+            this@VrHomeActivity.handMask = HandProfile.mask(this@VrHomeActivity)
+        }
+
+        override fun previewHandMask(on: Boolean) { maskPreview = on }
 
         override fun boundaryText(): String = when {
             ar == null -> "Нужен 6DoF (ARCore): без него граница не работает"
@@ -1345,6 +1359,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                 viewScaleX = eyeAspect
                 viewScaleY = eyeAspect / cameraAspect
             }
+            buildMasks()
             for (index in 0..1) {
                 GLES20.glViewport(index * eyeWidth, 0, eyeWidth, height)
                 // Passthrough fills each eye; the camera image is cropped to the eye's shape.
@@ -1367,6 +1382,8 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                 Matrix.setIdentityM(eye, 0)
                 Matrix.translateM(eye, 0, if (index == 0) .032f else -.032f, 0f, 0f)
                 Matrix.multiplyMM(view, 0, eye, 0, worldToHead, 0)
+                // Hands cut through everything virtual: their shape goes into the depth buffer first.
+                writeHandMask()
 
                 // Home icons.
                 Matrix.multiplyMM(mvp, 0, projection, 0, view, 0)
@@ -1592,26 +1609,20 @@ class VrHomeActivity : Activity(), LifecycleOwner {
          * (so they are never hidden behind a window), and the cursor on the aim point.
          */
         private fun hand() {
-            val hands = handPoints
             Matrix.multiplyMM(mvp, 0, projection, 0, eye, 0)
+            // The menu is still depth-tested, so the pointing hand shows in front of it.
             handMenu?.let { menu -> if (!menu.x.isNaN()) drawHandMenu(menu) }
-            val tracker6 = ar
-            val corners = if (tracker6 != null && tracker6.hasUv) FloatArray(8).also {
-                tracker6.passthroughUv.position(0); tracker6.passthroughUv.get(it); tracker6.passthroughUv.position(0)
-            } else null
-            val hasPicture = corners != null || (tracker6 == null && hasCamera)
-            if (hasPicture) for (points in hands) {
-                val us = FloatArray(21) { points[it * 3] }
-                val vs = FloatArray(21) { points[it * 3 + 1] }
-                val mesh = RealHand.mesh(us, vs,
-                    { u, v -> floatArrayOf((u - .5f) * 2f * viewScaleX, (.5f - v) * 2f * viewScaleY) },
-                    { u, v -> if (corners != null) arUv(corners, u, v) else floatArrayOf(u, v) })
-                if (corners != null) triangles(externalProgram, arTexture, mvp, mesh, external = true)
-                else triangles(textureProgram, cameraTexture, mvp, mesh)
-            }
+            GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+            GLES20.glDepthMask(true)
+            Matrix.multiplyMM(mvp, 0, projection, 0, eye, 0)
             GLES20.glUseProgram(colorProgram)
             GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(colorProgram, "uMvp"), 1, false, mvp, 0)
             val position = GLES20.glGetAttribLocation(colorProgram, "aPosition")
+            // While calibrating, the cut-out is tinted so it can be fitted to the real hand.
+            if (maskPreview) {
+                GLES20.glUniform4f(GLES20.glGetUniformLocation(colorProgram, "uColor"), .2f, .6f, 1f, .35f)
+                for (mesh in maskMeshes) drawArray(mesh, GLES20.GL_TRIANGLES, position)
+            }
             val point = pinchPoint ?: return
             val x = (point[0] - .5f) * 2f * viewScaleX
             val y = (.5f - point[1]) * 2f * viewScaleY
@@ -1621,6 +1632,42 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             disc(x, y, r * 1.45f, position)
             GLES20.glUniform4f(GLES20.glGetUniformLocation(colorProgram, "uColor"), 1f, 1f, 1f, 1f)
             disc(x, y, r, position)
+        }
+
+        /** Hand shapes for this frame (head space, on a plane 40 cm in front of the eyes). */
+        private var maskMeshes: List<FloatArray> = emptyList()
+
+        /**
+         * The hands go into the depth buffer, nearer than any window: everything virtual drawn after
+         * this is hidden where the hands are, and the real camera picture behind shows through —
+         * exactly aligned, because it is the passthrough itself. Nothing changes over empty space.
+         */
+        private fun writeHandMask() {
+            GLES20.glClear(GLES20.GL_DEPTH_BUFFER_BIT)
+            GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+            GLES20.glDepthFunc(GLES20.GL_LESS)
+            val masks = maskMeshes
+            if (masks.isNotEmpty()) {
+                Matrix.multiplyMM(mvp, 0, projection, 0, eye, 0)
+                GLES20.glUseProgram(colorProgram)
+                GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(colorProgram, "uMvp"), 1, false, mvp, 0)
+                val position = GLES20.glGetAttribLocation(colorProgram, "aPosition")
+                GLES20.glDepthMask(true)
+                GLES20.glColorMask(false, false, false, false)
+                for (mesh in masks) drawArray(mesh, GLES20.GL_TRIANGLES, position)
+                GLES20.glColorMask(true, true, true, true)
+            }
+            GLES20.glDepthMask(false)
+        }
+
+        /** Builds this frame's hand cut-outs from the landmarks and the calibration. */
+        private fun buildMasks() {
+            val calibration = handMask
+            maskMeshes = handPoints.map { points ->
+                val xs = FloatArray(21) { ((points[it * 3] - .5f) * 2f * viewScaleX + calibration.dx) * MASK_DEPTH }
+                val ys = FloatArray(21) { ((.5f - points[it * 3 + 1]) * 2f * viewScaleY + calibration.dy) * MASK_DEPTH }
+                GhostHand.triangles(xs, ys, -MASK_DEPTH, handProfile, calibration.grow)
+            }
         }
 
         /** Where a point of the eye's view (0..1, y down) is in ARCore's camera texture. */
@@ -1760,6 +1807,8 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         private const val ID_CALLS = "own:calls"
         private const val ID_ELIX = "own:elix"
         private const val LONG_PRESS_MS = 700L
+        /** The hands' cut-out lies this far in front of the eyes, nearer than any window. */
+        private const val MASK_DEPTH = .4f
         private const val ID_PERSONA = "own:persona"
         private const val KEYBOARD_W = 1.7f
         private val KEYBOARD_H = KEYBOARD_W * KeyboardPanel.HEIGHT / KeyboardPanel.WIDTH
