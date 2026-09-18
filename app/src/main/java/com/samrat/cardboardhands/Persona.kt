@@ -68,6 +68,14 @@ object Persona {
     /** Studies the photo and saves the portrait; null with a reason when no face is found. */
     fun build(context: Context, photo: Uri): String? {
         val source = decode(context, photo) ?: return "Фото не открывается"
+        return build(context, source)
+    }
+
+    /**
+     * Makes the Persona from a picture (gallery or the front camera): the person is cut out of the
+     * background by a segmentation network, so it floats on its own like in visionOS.
+     */
+    fun build(context: Context, source: Bitmap): String? {
         val options = FaceLandmarker.FaceLandmarkerOptions.builder()
             .setBaseOptions(BaseOptions.builder().setModelAssetPath("face_landmarker.task").build())
             .setRunningMode(RunningMode.IMAGE)
@@ -92,30 +100,25 @@ object Persona {
         val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
         val cropSrc = android.graphics.Rect(crop.left.toInt(), crop.top.toInt(), crop.right.toInt(), crop.bottom.toInt())
         val full = android.graphics.Rect(0, 0, SIZE, SIZE)
-        // Frosted background: the photo shrunk to a few pixels and blown up, softened and lighter.
-        val tiny = Bitmap.createBitmap(24, 24, Bitmap.Config.ARGB_8888)
-        Canvas(tiny).drawBitmap(source, cropSrc, android.graphics.Rect(0, 0, 24, 24), paint)
-        val soft = Paint(Paint.FILTER_BITMAP_FLAG).apply {
-            colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(.55f) })
+        canvas.drawBitmap(source, cropSrc, full, paint)
+        // Only the person: the segmentation mask becomes the alpha, softened at the edge.
+        val mask = personMask(context, portrait)
+        if (mask != null) {
+            val pixels = IntArray(SIZE * SIZE)
+            portrait.getPixels(pixels, 0, SIZE, 0, 0, SIZE, SIZE)
+            for (i in pixels.indices) {
+                val alpha = ((mask[i] - .35f) / .4f).coerceIn(0f, 1f)
+                pixels[i] = (pixels[i] and 0x00ffffff) or ((alpha * 255).toInt() shl 24)
+            }
+            portrait.setPixels(pixels, 0, SIZE, 0, 0, SIZE, SIZE)
         }
-        canvas.drawColor(Color.rgb(170, 172, 176))
-        canvas.drawBitmap(tiny, null, full, soft)
-        canvas.drawColor(Color.argb(60, 235, 238, 242))
-        // The person: sharp in the middle, melting into the frosted glass towards the edges.
-        val layer = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
-        val layerCanvas = Canvas(layer)
-        layerCanvas.drawBitmap(source, cropSrc, full, paint)
-        val faceCenterY = ((ys.min() + ys.max()) / 2 - crop.top) * scale
-        val mask = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = RadialGradient(
-                SIZE / 2f, faceCenterY + SIZE * .12f, SIZE * .62f,
-                intArrayOf(Color.BLACK, Color.BLACK, Color.TRANSPARENT), floatArrayOf(0f, .62f, 1f), Shader.TileMode.CLAMP
-            )
+        // Shoulders fade out at the bottom, like a bust.
+        val fade = Paint().apply {
+            shader = android.graphics.LinearGradient(0f, SIZE * .78f, 0f, SIZE.toFloat(), Color.BLACK, Color.TRANSPARENT, Shader.TileMode.CLAMP)
             xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
         }
-        layerCanvas.drawRect(0f, 0f, SIZE.toFloat(), SIZE.toFloat(), mask)
-        canvas.drawBitmap(layer, 0f, 0f, null)
-        layer.recycle(); tiny.recycle(); source.recycle()
+        canvas.drawRect(0f, 0f, SIZE.toFloat(), SIZE.toFloat(), fade)
+        source.recycle()
 
         val points = FloatArray(xs.size * 2) { i -> if (i % 2 == 0) (xs[i / 2] - crop.left) * scale else (ys[i / 2] - crop.top) * scale }
         val folder = File(context.filesDir, DIR).apply { mkdirs() }
@@ -124,6 +127,27 @@ object Persona {
         portrait.recycle()
         return null
     }
+
+    /** Person probability per pixel (SIZE × SIZE), from MediaPipe's selfie segmenter. */
+    private fun personMask(context: Context, image: Bitmap): FloatArray? = runCatching {
+        val options = com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenter.ImageSegmenterOptions.builder()
+            .setBaseOptions(BaseOptions.builder().setModelAssetPath("selfie_segmenter.tflite").build())
+            .setRunningMode(RunningMode.IMAGE)
+            .setOutputConfidenceMasks(true)
+            .setOutputCategoryMask(false)
+            .build()
+        com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenter.createFromOptions(context, options).use { segmenter ->
+            val result = segmenter.segment(BitmapImageBuilder(image).build())
+            val masks = result.confidenceMasks().orElse(null) ?: return null
+            val mask = masks.last()
+            val buffer = com.google.mediapipe.framework.image.ByteBufferExtractor.extract(mask).order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer()
+            val w = mask.width; val h = mask.height
+            FloatArray(SIZE * SIZE) { i ->
+                val x = (i % SIZE) * w / SIZE; val y = (i / SIZE) * h / SIZE
+                buffer.get(y * w + x)
+            }
+        }
+    }.getOrNull()
 
     private fun decode(context: Context, uri: Uri): Bitmap? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -277,7 +301,8 @@ class PersonaContent(private val context: Context) : VrWindow.Content {
         for (i in Persona.LEFT_IRIS + Persona.RIGHT_IRIS) moved[i * 2 + 1] = y(i) + blink * 2f
         // Mouth: the jaw drops (lower lip, chin, lower face), corners pull in for round vowels.
         val mouthWidth = x(Persona.MOUTH_RIGHT) - x(Persona.MOUTH_LEFT)
-        val drop = open * mouthWidth * .55f
+        // A natural talking mouth opens little: at most about a third of its width.
+        val drop = open * mouthWidth * .3f
         val mouthX = (x(Persona.MOUTH_LEFT) + x(Persona.MOUTH_RIGHT)) / 2
         val mouthY = (y(Persona.UPPER_LIP) + y(Persona.LOWER_LIP)) / 2
         val chinY = y(Persona.CHIN)
@@ -288,27 +313,34 @@ class PersonaContent(private val context: Context) : VrWindow.Content {
             if (dy <= 0f && i !in Persona.LOWER_INNER) continue
             val across = (1f - dx / (mouthWidth * 1.1f)).coerceIn(0f, 1f)
             val down = if (dy <= jaw) 1f else (1f - (dy - jaw) / (jaw * .6f)).coerceIn(0f, 1f)
-            val weight = if (i in Persona.LOWER_INNER) 1f else across * down
+            // The lower lip moves fully, the chin about half as much (the jaw hinges far back).
+            val weight = if (i in Persona.LOWER_INNER) 1f else across * down * (if (dy <= jaw * .35f) .9f else .55f)
             moved[i * 2 + 1] = y(i) + drop * weight
         }
         val pinch = (round - .5f) * open * mouthWidth * .18f
         for (corner in intArrayOf(Persona.MOUTH_LEFT, 78)) moved[corner * 2] = x(corner) + pinch
         for (corner in intArrayOf(Persona.MOUTH_RIGHT, 308)) moved[corner * 2] = x(corner) - pinch
 
+        frame.eraseColor(Color.TRANSPARENT)
         canvas.drawBitmap(f.image, 0f, 0f, null)
         // The open mouth: dark inside, a hint of upper teeth.
         if (open > .03f) {
             val path = Path()
             Persona.INNER_LIPS.forEachIndexed { k, i -> if (k == 0) path.moveTo(moved[i * 2], moved[i * 2 + 1]) else path.lineTo(moved[i * 2], moved[i * 2 + 1]) }
             path.close()
-            mouthPaint.color = Color.rgb(52, 18, 20)
-            canvas.drawPath(path, mouthPaint)
-            canvas.save()
-            canvas.clipPath(path)
-            mouthPaint.color = Color.rgb(226, 222, 212)
+            // Warm, soft dark inside (not black), teeth only as a faint edge when wide open.
             val top = moved[Persona.UPPER_LIP * 2 + 1]
-            canvas.drawRect(mouthX - mouthWidth / 2, top - 4f, mouthX + mouthWidth / 2, top + drop * .28f, mouthPaint)
-            canvas.restore()
+            mouthPaint.shader = android.graphics.LinearGradient(0f, top, 0f, top + drop + 4f,
+                Color.rgb(96, 44, 44), Color.rgb(58, 24, 26), Shader.TileMode.CLAMP)
+            canvas.drawPath(path, mouthPaint)
+            mouthPaint.shader = null
+            if (open > .45f) {
+                canvas.save()
+                canvas.clipPath(path)
+                mouthPaint.color = Color.argb(150, 232, 226, 216)
+                canvas.drawRect(mouthX - mouthWidth * .3f, top - 2f, mouthX + mouthWidth * .3f, top + drop * .16f, mouthPaint)
+                canvas.restore()
+            }
         }
         // Everything but the mouth opening, warped.
         val inner = Persona.INNER_LIPS.toSet()

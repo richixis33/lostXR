@@ -36,7 +36,7 @@ class SettingsContent(
         fun boundaryText(): String
     }
 
-    private enum class Page(val title: String) { ABOUT("О гарнитуре"), FACE("Лицо"), BOUNDARY("Граница") }
+    private enum class Page(val title: String) { ABOUT("О гарнитуре"), UPDATE("Обновление ПО"), FACE("Лицо"), BOUNDARY("Граница") }
 
     override val pixelWidth = 1600
     override val pixelHeight = 1000
@@ -77,6 +77,72 @@ class SettingsContent(
         page = target
         picking = false
         status = null
+        if (target == Page.UPDATE && !checked) checkUpdate()
+    }
+
+    // Firmware-style update: the same PhoneXR release the app would install.
+    private var release: Updates.Release? = null
+    private var checked = false
+    private var checking = false
+    private var downloadProgress: Float? = null
+
+    private fun checkUpdate() {
+        checking = true
+        draw()
+        release = runCatching { Updates.check(context) }.getOrNull()
+        checked = true
+        checking = false
+    }
+
+    private fun update() {
+        text("Обновление ПО", 480f, 100f, 52f, Color.WHITE, bold = true)
+        card(480f, 150f, 2)
+        text("Автообновление", 510f, 200f, 34f, Color.WHITE)
+        text(if (Updates.autoUpdate(context)) "Вкл." else "Выкл.", 1560f, 200f, 34f, Color.rgb(170, 170, 178), right = true)
+        buttons += RectF(480f, 150f, 1580f, 228f) to { Updates.setAutoUpdate(context, !Updates.autoUpdate(context)) }
+        text("Бета‑обновления", 510f, 278f, 34f, Color.WHITE)
+        text(if (Updates.beta(context)) "Вкл." else "Выкл.", 1560f, 278f, 34f, Color.rgb(170, 170, 178), right = true)
+        buttons += RectF(480f, 228f, 1580f, 306f) to { Updates.setBeta(context, !Updates.beta(context)); checkUpdate() }
+        val found = release
+        when {
+            checking -> text("Проверка обновлений…", 480f, 420f, 36f, Color.rgb(170, 170, 178))
+            found == null -> {
+                text("PhoneXR ${Updates.currentVersion(context)}", 1030f, 440f, 44f, Color.WHITE, center = true, bold = true)
+                text(if (checked) "Установлена последняя версия ПО" else "", 1030f, 500f, 34f, Color.rgb(170, 170, 178), center = true)
+                button(RectF(830f, 560f, 1230f, 640f), "Проверить снова") { checkUpdate() }
+            }
+            else -> {
+                paint.color = Color.rgb(52, 52, 58)
+                canvas.drawRoundRect(RectF(480f, 340f, 1580f, 640f), 28f, 28f, paint)
+                context.packageManager.getApplicationIcon(context.packageName).let {
+                    it.setBounds(510, 370, 630, 490); it.draw(canvas)
+                }
+                text("PhoneXR ${found.version}", 660f, 420f, 44f, Color.WHITE, bold = true)
+                text(Updates.formatSize(found.size), 660f, 470f, 32f, Color.rgb(170, 170, 178))
+                val progress = downloadProgress
+                button(RectF(510f, 530f, 1550f, 610f), when {
+                    progress == null -> "Обновить сейчас"
+                    progress < 0f -> "Загрузка…"
+                    else -> "Загрузка ${(progress * 100).toInt()}%"
+                }) {
+                    if (downloadProgress == null) {
+                        downloadProgress = 0f
+                        var shown = -1
+                        val file = runCatching {
+                            Updates.download(context, found) { value ->
+                                downloadProgress = value
+                                val percent = (value * 100).toInt()
+                                if (percent != shown && percent % 5 == 0) { shown = percent; draw() }
+                            }
+                        }.getOrNull()
+                        downloadProgress = null
+                        val activity = context as? android.app.Activity
+                        if (file != null && activity != null) activity.runOnUiThread { Updates.install(activity, file) }
+                        else status = "Обновление не скачалось"
+                    }
+                }
+            }
+        }
     }
 
     private fun choosePhoto() {
@@ -128,6 +194,7 @@ class SettingsContent(
             Page.ABOUT -> about()
             Page.FACE -> face()
             Page.BOUNDARY -> boundary()
+            Page.UPDATE -> update()
         }
         fresh = true
     }

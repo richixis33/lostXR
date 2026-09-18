@@ -19,11 +19,31 @@ object GhostHand {
     private const val SEGMENTS = 12
 
     /**
+     * Fingers keep the lengths scanned in setup: only their directions come from the camera, so
+     * jittery landmarks no longer make fingers stretch and shrink. Palm bones are left as seen.
+     */
+    private fun steady(xs: FloatArray, ys: FloatArray, palm: Float, profile: FloatArray) {
+        BONES.forEachIndexed { index, (a, b) ->
+            if (b !in FINGER_JOINTS) return@forEachIndexed
+            val dx = xs[b] - xs[a]; val dy = ys[b] - ys[a]
+            val length = hypot(dx, dy)
+            if (length < 1e-6f) return@forEachIndexed
+            // Foreshortening makes a finger look shorter, never longer: cap it at the real length.
+            val target = kotlin.math.min(length, profile[index] * palm)
+            xs[b] = xs[a] + dx / length * target
+            ys[b] = ys[a] + dy / length * target
+        }
+    }
+
+    private val FINGER_JOINTS = setOf(2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16, 18, 19, 20)
+
+    /**
      * Triangles (x, y, z per vertex) for a hand whose landmark i sits at ([xs][i], [ys][i]) on the
      * plane [z]. Sizes follow the hand's own palm width, so a nearer hand is drawn bigger.
      */
-    fun triangles(xs: FloatArray, ys: FloatArray, z: Float): FloatArray {
+    fun triangles(xs: FloatArray, ys: FloatArray, z: Float, profile: FloatArray? = null): FloatArray {
         val palm = hypot(xs[5] - xs[17], ys[5] - ys[17]).coerceAtLeast(1e-4f)
+        if (profile != null) steady(xs, ys, palm, profile)
         val out = ArrayList<Float>(2400)
         fun vertex(x: Float, y: Float) { out += x; out += y; out += z }
         fun radius(i: Int) = palm * when {

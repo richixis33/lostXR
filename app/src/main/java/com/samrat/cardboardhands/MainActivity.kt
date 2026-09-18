@@ -70,12 +70,12 @@ class MainActivity : ComponentActivity() {
 
     private var shizuku by mutableStateOf(VirtualScreen.Access.NOT_RUNNING)
     private var cinemaScene by mutableStateOf(CinemaActivity.SCENE_ROOM)
-    private var cinemaApps by mutableStateOf<List<Pair<String, String>>?>(null)
     private val shizukuListener = rikka.shizuku.Shizuku.OnRequestPermissionResultListener { _, _ ->
         runOnUiThread { shizuku = VirtualScreen.access() }
     }
 
     private var storeItems by mutableStateOf<List<GameStore.Item>?>(null)
+    private var androidApps by mutableStateOf(false)
     /** A VR mode from the store whose activation steps are shown. */
     private var guide by mutableStateOf<VrMode?>(null)
     private var webApps by mutableStateOf<List<WebApps.App>>(emptyList())
@@ -121,7 +121,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         resumes++
+        androidApps = AndroidAppsContent.enabled(this)
         refreshGames()
+        checkUpdateOnce()
         shizuku = VirtualScreen.access()
     }
 
@@ -171,6 +173,16 @@ class MainActivity : ComponentActivity() {
 
         pendingPatch?.let { PatchDialog(it) }
         guide?.let { GuideDialog(it) }
+        update?.let { found ->
+            CupertinoAlertDialog(
+                onDismissRequest = { update = null },
+                title = { CupertinoText("Доступно PhoneXR ${found.version}") },
+                message = { CupertinoText(Updates.formatSize(found.size)) }
+            ) {
+                cancel(onClick = { update = null }) { CupertinoText("Позже") }
+                default(onClick = { update = null; start(UpdateActivity::class.java) }) { CupertinoText("Подробнее") }
+            }
+        }
         ready?.let { ReadyDialog(it) }
         error?.let { message ->
             CupertinoAlertDialog(
@@ -179,6 +191,19 @@ class MainActivity : ComponentActivity() {
                 message = { CupertinoText(message) }
             ) { default(onClick = { error = null }) { CupertinoText("OK") } }
         }
+    }
+
+    private var updateChecked = false
+    private var update by mutableStateOf<Updates.Release?>(null)
+
+    /** Automatic updates: once per start, a new version opens the update screen. */
+    private fun checkUpdateOnce() {
+        if (updateChecked || !Updates.autoUpdate(this)) return
+        updateChecked = true
+        Thread {
+            val found = runCatching { Updates.check(this) }.getOrNull() ?: return@Thread
+            runOnUiThread { update = found }
+        }.start()
     }
 
     private fun selectTab(index: Int) {
@@ -232,8 +257,6 @@ class MainActivity : ComponentActivity() {
 
             RuntimeSection()
 
-            CinemaSection()
-
             HigSection(
                 title = "Daydream",
                 footer = "Игры Daydream ищут Google VR Services. PhoneXR ставит Opendream Services 1.13 — " +
@@ -279,65 +302,6 @@ class MainActivity : ComponentActivity() {
             ) { PhoneXrRuntime.openBroker(this@MainActivity) }
         }
     }
-
-    /** PXR Bedrock: Minecraft (or any app) on a big screen in VR, played with a gamepad or Joy-Con. */
-    @Composable
-    private fun CinemaSection() {
-        val minecraft = isInstalled(MINECRAFT)
-        HigSection(
-            title = "PXR Bedrock · кинотеатр",
-            footer = "Minecraft Bedrock (любая версия) на большом экране в VR: голова поворачивается, экран стоит на месте. " +
-                "Играйте геймпадом или Joy‑Con: они управляют Minecraft напрямую. Нужен запущенный Shizuku. " +
-                "Нажатие на экран телефона выравнивает вид."
-        ) {
-            when (shizuku) {
-                VirtualScreen.Access.NOT_RUNNING -> HigLink("Shizuku не запущен", value = "Открыть") {
-                    packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")?.let { startActivity(it) }
-                        ?: run { error = "Установите и запустите Shizuku" }
-                }
-                VirtualScreen.Access.NEEDS_PERMISSION -> HigLink("Разрешить доступ Shizuku") {
-                    VirtualScreen.requestPermission()
-                }
-                VirtualScreen.Access.READY -> HigRow("Shizuku", "Готов")
-            }
-            HigChoice("Комната", "Гостиная из Minecraft VR, экран над камином", cinemaScene == CinemaActivity.SCENE_ROOM) {
-                cinemaScene = CinemaActivity.SCENE_ROOM
-            }
-            HigChoice("В воздухе", "Парящий остров над миром и облаками", cinemaScene == CinemaActivity.SCENE_SKY) {
-                cinemaScene = CinemaActivity.SCENE_SKY
-            }
-            HigChoice("Дом из Roblox", "Гостиная Brookhaven, экран над камином", cinemaScene == CinemaActivity.SCENE_ROBLOX) {
-                cinemaScene = CinemaActivity.SCENE_ROBLOX
-            }
-            HigChoice("Арена Brawl Stars", "360° панорама вокруг", cinemaScene == CinemaActivity.SCENE_BRAWL) {
-                cinemaScene = CinemaActivity.SCENE_BRAWL
-            }
-            if (minecraft) {
-                HigLink("Играть в Minecraft", enabled = shizuku == VirtualScreen.Access.READY) { openCinema(MINECRAFT) }
-            } else {
-                HigLink("Установить Minecraft", value = "Google Play") {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$MINECRAFT")))
-                }
-            }
-            HigLink(
-                if (cinemaApps == null) "Другое приложение…" else "Скрыть приложения",
-                enabled = shizuku == VirtualScreen.Access.READY
-            ) {
-                cinemaApps = if (cinemaApps != null) null else launchableApps()
-            }
-            cinemaApps?.forEach { (packageName, label) ->
-                HigLink(label) { openCinema(packageName) }
-            }
-        }
-    }
-
-    private fun launchableApps(): List<Pair<String, String>> =
-        packageManager.queryIntentActivities(
-            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
-        ).map { it.activityInfo.packageName to it.loadLabel(packageManager).toString() }
-            .filter { it.first != packageName }
-            .distinctBy { it.first }
-            .sortedBy { it.second.lowercase() }
 
     private fun openCinema(target: String, scene: String = cinemaScene) {
         startActivity(
@@ -394,6 +358,16 @@ class MainActivity : ComponentActivity() {
                     "игра двумя руками или Joy‑Con. Нажмите на режим — появится инструкция."
             ) {
                 VR_MODES.forEach { mode -> VrModeRow(mode) }
+            }
+            HigSection(
+                title = "Приложения PhoneXR",
+                footer = "Android‑приложения: любые приложения телефона окнами в VR (нужен Shizuku). Появляется на главном экране VR."
+            ) {
+                val added = resumes >= 0 && androidApps
+                HigLink("Android‑приложения", value = if (added) "Удалить" else "Получить") {
+                    androidApps = !added
+                    AndroidAppsContent.setEnabled(this@MainActivity, !added)
+                }
             }
             val items = storeItems
             HigSection(
@@ -625,6 +599,7 @@ class MainActivity : ComponentActivity() {
                 HigRow("Сервер", GameStore.URL_BASE.removePrefix("https://"))
             }
             HigSection {
+                HigLink("Обновление ПО") { start(UpdateActivity::class.java) }
                 HigLink("О приложении") { start(AboutActivity::class.java) }
             }
         }

@@ -126,7 +126,15 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         }
     private var drag: Drag? = null
     private var pressedHit: Hit? = null
-    private val pinchLatch = HandGestures.PinchLatch()
+    /** Pinch thresholds from the setup's calibration. */
+    private val pinchLatch by lazy { HandProfile.latch(this) }
+    /** First-start setup; null once the home is set up. */
+    @Volatile private var onboarding: Onboarding? = null
+    private var onboardingTexture = 0
+    /** When the home appeared after setup, for its entrance animation. */
+    @Volatile private var appearStart = 0L
+    /** Bone lengths from the setup's hand scan (null before it). */
+    private val handProfile by lazy { HandProfile.bones(this) }
     private var wasPinching = false
     private var joyConDown = false
     private var stickHeldUntil = 0L
@@ -141,6 +149,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
 
     private sealed class Hit {
         data class Panel(val u: Float, val v: Float) : Hit()
+        data class Setup(val u: Float, val v: Float) : Hit()
         data class Content(val window: VrWindow, val u: Float, val v: Float) : Hit()
         data class Bar(val window: VrWindow) : Hit()
         data class Minimize(val window: VrWindow) : Hit()
@@ -178,6 +187,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             setOnClickListener { recenter() }
         }
         setContentView(surfaceView)
+        if (!Settings.setupDone(this)) onboarding = Onboarding(this, onboardingHost)
         if (Settings.load(this).sixDof && ArTracker.availability(this) == ArTracker.Availability.READY) ar = ArTracker.create(this)
         trackingExecutor.execute {
             handTracker = runCatching { HandTracker(this, useGpu = true, onResult = ::onHands) }
@@ -252,6 +262,28 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         }
     }
 
+    private val onboardingHost = object : Onboarding.Host {
+        override val sixDof get() = ar != null
+        override fun startBoundary() = boundary.startTracing()
+        override fun boundaryReady() = boundary.tracing == null && boundary.defined
+        override fun capturePersona() = runOnUiThread {
+            @Suppress("DEPRECATION")
+            startActivityForResult(Intent(this@VrHomeActivity, PersonaCaptureActivity::class.java), REQUEST_PERSONA)
+        }
+        override fun finish() {
+            onboarding = null
+            appearStart = SystemClock.elapsedRealtime()
+            redraw.set(true)
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_PERSONA) onboarding?.personaDone()
+    }
+
     /** "Straight ahead" and "here" become the current head direction and spot. */
     private fun recenter() {
         tracker.recenter()
@@ -309,7 +341,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                 HomePanel.Entry(ID_PHOTOS, "Фото", drawPhotosIcon()),
                 HomePanel.Entry(ID_SETTINGS, "Настройки", symbolIcon("⚙", Color.rgb(142, 142, 147))),
                 HomePanel.Entry(ID_STORE, "Магазин", drawStoreIcon()),
-            )
+            ) + if (AndroidAppsContent.enabled(this)) listOf(HomePanel.Entry(ID_ANDROID, "Android", symbolIcon("▦", Color.rgb(61, 220, 132)))) else emptyList()
             val vr = found.map {
                 HomePanel.Entry("app:${it.packageName}", it.label, runCatching { packageManager.getApplicationIcon(it.packageName) }.getOrNull())
             }
@@ -342,6 +374,14 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             id == ID_BROWSER -> openWindow("browser", "Браузер", ID_BROWSER) { BrowserContent(BrowserContent.HOME, ::openWebXr) }
             id == ID_PHOTOS -> openWindow("photos", "Фото", ID_PHOTOS) { PhotosContent(this) }
             id == ID_SETTINGS -> openWindow("settings", "Настройки", ID_SETTINGS) { SettingsContent(this, settingsHost) }
+            id == ID_ANDROID -> openWindow("android", "Android‑приложения", ID_ANDROID) {
+                AndroidAppsContent(this) { name, label ->
+                    runOnUiThread {
+                        if (VirtualScreen.access() != VirtualScreen.Access.READY) toast("Запустите Shizuku и разрешите доступ PhoneXR")
+                        else openWindow("app:$name", label, ID_ANDROID) { ShizukuAppContent(name) { toast(it) } }
+                    }
+                }
+            }
             id == MENU_BOUNDARY -> startBoundaryTracing()
             id == ID_MINECRAFT -> {
                 if (runCatching { packageManager.getApplicationInfo(MINECRAFT, 0) }.isFailure) {
@@ -558,6 +598,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             val physicalLeft = result.handednesses().getOrNull(index)?.firstOrNull()?.categoryName().equals("Right", true)
             physicalLeft to HandGestures.shape(points, physicalLeft)
         }
+        onboarding?.onHands(hands, handPoints)
         // Keep the hand that holds the cursor; otherwise a pinching hand, otherwise the nearest one.
         val chosen = hands.firstOrNull { it.first == activeLeft && (pinchLatch.pinching || wasPinching) }
             ?: hands.firstOrNull { it.second.pinchGap < .3f }
@@ -590,7 +631,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         val pinching = pinchLatch.update(hand)
         if (pinching && !wasPinching) {
             wasPinching = true
-            if (hand.palmToFace) {
+            if (hand.palmToFace && onboarding == null) {
                 runOnUiThread { if (panel.mode == HomePanel.Mode.MENU) switchMode(HomePanel.Mode.HOME) else openMenu() }
             } else if (boundary.tracing != null) {
                 if (boundary.finish()) toast("Граница сохранена") else toast("Граница слишком маленькая — обойдите комнату")
@@ -636,6 +677,13 @@ class VrHomeActivity : Activity(), LifecycleOwner {
 
     private fun hitTest(direction: FloatArray?): Hit? {
         direction ?: return null
+        if (onboarding != null) {
+            val local = toLocal(direction, 0f, PANEL_RADIUS) ?: return null
+            val height = PANEL_WIDTH * Onboarding.HEIGHT / Onboarding.WIDTH
+            val u = (local[0] + PANEL_WIDTH / 2) / PANEL_WIDTH
+            val v = (height / 2 - local[1]) / height
+            return if (u in 0f..1f && v in 0f..1f) Hit.Setup(u, v) else null
+        }
         // The keyboard floats closest to the user.
         keyboardWindow()?.let { window ->
             val local = toLocal(direction, window.yaw, KEYBOARD_RADIUS)
@@ -690,6 +738,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     }
 
     private fun updateHit(target: Hit?) {
+        if (target is Hit.Setup) onboarding?.hover(target.u, target.v)
         val key = (target as? Hit.Keyboard)?.let { keyboard.hovered(it.u, it.v) }
         if (key != hoveredKey) {
             hoveredKey = key
@@ -710,6 +759,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         pressing = true
         pressedHit = target
         when (target) {
+            is Hit.Setup -> onboarding?.press(target.u, target.v)
             is Hit.Panel -> {
                 val item = synchronized(panel) { panel.hit(target.u, target.v) } ?: return
                 runOnUiThread {
@@ -987,6 +1037,10 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
             ar?.attachTexture(arTexture)
+            onboardingTexture = IntArray(1).also { GLES20.glGenTextures(1, it, 0) }[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, onboardingTexture)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
             warningTexture = bannerTexture("Вы вышли за границу — вернитесь назад", Color.rgb(255, 69, 58))
             tracingTexture = bannerTexture("Обойдите край свободного места · щипок — готово", Color.rgb(10, 132, 255))
             redraw.set(true)
@@ -1065,6 +1119,16 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                     GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, panel.bitmap, 0)
                 }
             }
+            val setup = onboarding
+            if (setup != null) {
+                // The setup animates every frame (hello, progress, the cursor in the name field).
+                synchronized(setup) {
+                    if (setup.draw()) {
+                        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, onboardingTexture)
+                        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, setup.bitmap, 0)
+                    }
+                }
+            }
             val typing = keyboardWindow()
             if (typing != null && keyboardRedraw.getAndSet(false)) {
                 keyboard.draw(hoveredKey)
@@ -1141,10 +1205,21 @@ class VrHomeActivity : Activity(), LifecycleOwner {
 
                 // Home icons.
                 Matrix.multiplyMM(mvp, 0, projection, 0, view, 0)
-                val pw = PANEL_WIDTH / 2
-                val ph = PANEL_HEIGHT / 2
-                val pz = -PANEL_RADIUS
-                quad(textureProgram, panelTexture, mvp, floatArrayOf(-pw, -ph, pz, 0f, 1f, pw, -ph, pz, 1f, 1f, -pw, ph, pz, 0f, 0f, pw, ph, pz, 1f, 0f))
+                if (onboarding != null) {
+                    val sw = PANEL_WIDTH / 2
+                    val sh = sw * Onboarding.HEIGHT / Onboarding.WIDTH
+                    val sz = -PANEL_RADIUS
+                    quad(textureProgram, onboardingTexture, mvp, floatArrayOf(-sw, -sh, sz, 0f, 1f, sw, -sh, sz, 1f, 1f, -sw, sh, sz, 0f, 0f, sw, sh, sz, 1f, 0f))
+                } else {
+                    // After setup the home flies in from a little further away and grows into place.
+                    val appear = if (appearStart == 0L) 1f else ((SystemClock.elapsedRealtime() - appearStart) / 900f).coerceIn(0f, 1f)
+                    val ease = 1f - (1f - appear) * (1f - appear) * (1f - appear)
+                    val grow = .6f + .4f * ease
+                    val pw = PANEL_WIDTH / 2 * grow
+                    val ph = PANEL_HEIGHT / 2 * grow
+                    val pz = -PANEL_RADIUS - (1f - ease) * .9f
+                    quad(textureProgram, panelTexture, mvp, floatArrayOf(-pw, -ph, pz, 0f, 1f, pw, -ph, pz, 1f, 1f, -pw, ph, pz, 0f, 0f, pw, ph, pz, 1f, 0f))
+                }
 
                 // Windows, focused last so it is on top.
                 val ordered = windows.filter { !it.minimized }.sortedBy { it == focused }
@@ -1284,7 +1359,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             for (points in hands) {
                 val xs = FloatArray(21) { (points[it * 3] - .5f) * 2f * viewScaleX }
                 val ys = FloatArray(21) { (.5f - points[it * 3 + 1]) * 2f * viewScaleY }
-                val triangles = GhostHand.triangles(xs, ys, -1f)
+                val triangles = GhostHand.triangles(xs, ys, -1f, handProfile)
                 val buffer = ByteBuffer.allocateDirect(triangles.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(triangles)
                 buffer.position(0)
                 GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, 12, buffer)
@@ -1460,7 +1535,9 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         private const val MENU_EXIT = "menu:exit"
         private const val MENU_PHOTO = "menu:photo"
         private const val MENU_BOUNDARY = "menu:boundary"
+        private const val REQUEST_PERSONA = 42
         private const val ID_SETTINGS = "own:settings"
+        private const val ID_ANDROID = "own:android"
         private const val ID_PERSONA = "own:persona"
         private const val KEYBOARD_W = 1.7f
         private val KEYBOARD_H = KEYBOARD_W * KeyboardPanel.HEIGHT / KeyboardPanel.WIDTH

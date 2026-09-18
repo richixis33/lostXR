@@ -120,6 +120,22 @@ object Settings {
 
     fun defaults() = State()
 
+    /** The name chosen in the first setup, shown in VR. */
+    fun userName(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_USER_NAME, "") ?: ""
+
+    fun setUserName(context: Context, name: String) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_USER_NAME, name).apply()
+
+    /** The first-start setup in the headset has been completed (or skipped to the end). */
+    fun setupDone(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SETUP_DONE, false)
+
+    fun setSetupDone(context: Context, done: Boolean = true) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_SETUP_DONE, done).apply()
+
+    private const val KEY_USER_NAME = "user_name"
+    private const val KEY_SETUP_DONE = "setup_done"
+
     /** Human-readable name for a key code, used when showing what is bound. */
     fun keyName(code: Int): String = when (code) {
         KeyEvent.KEYCODE_BUTTON_A -> "A"
