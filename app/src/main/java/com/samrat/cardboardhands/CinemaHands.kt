@@ -16,7 +16,7 @@ class CinemaHands(
     /** Screen centre y, z, width and the eye height, from the renderer. */
     private val placement: () -> FloatArray,
     private val onCursors: (List<CinemaRenderer.Cursor>) -> Unit,
-    /** See-through hands in head space (triangles on the plane z = -1). */
+    /** Real hands in head space: triangles with camera texture coordinates (x, y, z, u, v). */
     private val onGhosts: (List<FloatArray>) -> Unit,
     private val inject: (MotionEvent) -> Unit,
 ) {
@@ -106,10 +106,12 @@ class CinemaHands(
                 hand.seen = true
                 minecraftGestures(hand, shape, points)
             }
-            ghosts += GhostHand.triangles(
-                FloatArray(21) { (points[it].x() - .5f) * 2f * TAN_X },
-                FloatArray(21) { (.5f - points[it].y()) * 2f * TAN_Y },
-                -1f,
+            // The real hand from the camera, over everything (x, y, z, u, v per vertex).
+            ghosts += RealHand.mesh(
+                FloatArray(21) { points[it].x() },
+                FloatArray(21) { points[it].y() },
+                { u, v -> floatArrayOf((u - .5f) * 2f * TAN_X, (.5f - v) * 2f * TAN_Y) },
+                { u, v -> floatArrayOf(u, v) },
             )
             if (minecraft) return@forEachIndexed
             val x = hand.filterX.filter(shape.aimX, now)

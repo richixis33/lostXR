@@ -34,6 +34,10 @@ class ArTracker private constructor(private val session: Session) {
     /** Head position in the head tracker's world, metres, relative to where tracking started. */
     val position = FloatArray(3)
     private var origin: FloatArray? = null
+    // Steady position: calm when standing, quick when walking; no millimetre shimmer.
+    private val smooth = Array(3) { HandGestures.OneEuro(minCutoff = 1.0f, beta = 2.5f, deadZone = .003f) }
+    private val lastRaw = FloatArray(3)
+    private var hasLast = false
     private var alignYaw = Float.NaN
     private val quadNdc: FloatBuffer = floatBuffer(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
     /** Texture coordinates of the passthrough quad (per eye), updated when the display changes. */
@@ -60,6 +64,8 @@ class ArTracker private constructor(private val session: Session) {
     fun recenter() {
         origin = null
         alignYaw = Float.NaN
+        hasLast = false
+        smooth.forEach { it.reset() }
     }
 
     /**
@@ -90,12 +96,23 @@ class ArTracker private constructor(private val session: Session) {
             while (delta < -Math.PI) delta += (2 * Math.PI).toFloat()
             alignYaw = if (alignYaw.isNaN()) delta else alignYaw + wrap(delta - alignYaw) * .05f
             val start = origin ?: floatArrayOf(pose.tx(), pose.ty(), pose.tz()).also { origin = it }
+            // ARCore sometimes snaps to a corrected map: a jump of half a metre in one frame is not
+            // the user walking. Move the origin with it so the room does not lurch.
+            if (hasLast) {
+                val jx = pose.tx() - lastRaw[0]; val jy = pose.ty() - lastRaw[1]; val jz = pose.tz() - lastRaw[2]
+                if (jx * jx + jy * jy + jz * jz > .25f) { start[0] += jx; start[1] += jy; start[2] += jz }
+            }
+            lastRaw[0] = pose.tx(); lastRaw[1] = pose.ty(); lastRaw[2] = pose.tz(); hasLast = true
             val dx = pose.tx() - start[0]; val dy = pose.ty() - start[1]; val dz = pose.tz() - start[2]
             val c = kotlin.math.cos(alignYaw); val s = kotlin.math.sin(alignYaw)
+            val time = frame.timestamp
+            val px = smooth[0].filter(c * dx + s * dz, time)
+            val py = smooth[1].filter(dy, time)
+            val pz = smooth[2].filter(-s * dx + c * dz, time)
             synchronized(position) {
-                position[0] = c * dx + s * dz
-                position[1] = dy
-                position[2] = -s * dx + c * dz
+                position[0] = px
+                position[1] = py
+                position[2] = pz
             }
         }
         if (!wantImage) return null

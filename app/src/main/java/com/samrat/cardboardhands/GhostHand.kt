@@ -41,12 +41,12 @@ object GhostHand {
      * Triangles (x, y, z per vertex) for a hand whose landmark i sits at ([xs][i], [ys][i]) on the
      * plane [z]. Sizes follow the hand's own palm width, so a nearer hand is drawn bigger.
      */
-    fun triangles(xs: FloatArray, ys: FloatArray, z: Float, profile: FloatArray? = null): FloatArray {
+    fun triangles(xs: FloatArray, ys: FloatArray, z: Float, profile: FloatArray? = null, grow: Float = 1f): FloatArray {
         val palm = hypot(xs[5] - xs[17], ys[5] - ys[17]).coerceAtLeast(1e-4f)
         if (profile != null) steady(xs, ys, palm, profile)
         val out = ArrayList<Float>(2400)
         fun vertex(x: Float, y: Float) { out += x; out += y; out += z }
-        fun radius(i: Int) = palm * when {
+        fun radius(i: Int) = grow * palm * when {
             i in TIPS -> .10f
             i <= 4 -> .14f
             else -> .12f
@@ -86,5 +86,35 @@ object GhostHand {
             }
         }
         return out.toFloatArray()
+    }
+}
+
+/**
+ * The real hand over everything: the hand-shaped area of the camera picture drawn on top of the
+ * VR content, so the user's own hands stay visible in front of windows (like Quest and visionOS).
+ * The shape comes from the landmarks, a little wider than the fingers so a moving hand stays covered.
+ */
+object RealHand {
+    /** How much wider than the fingers the cut-out is. */
+    const val GROW = 1.45f
+
+    /**
+     * Triangles for one hand as x, y, z, u, v per vertex. [us], [vs]: landmarks in the space the
+     * caller maps from; [position] turns such a point into head space (z = -1), [uv] into the
+     * camera texture's coordinates.
+     */
+    fun mesh(us: FloatArray, vs: FloatArray, position: (Float, Float) -> FloatArray, uv: (Float, Float) -> FloatArray): FloatArray {
+        val flat = GhostHand.triangles(us, vs, 0f, null, GROW)
+        val out = FloatArray(flat.size / 3 * 5)
+        var o = 0
+        var i = 0
+        while (i < flat.size) {
+            val p = position(flat[i], flat[i + 1])
+            val t = uv(flat[i], flat[i + 1])
+            out[o] = p[0]; out[o + 1] = p[1]; out[o + 2] = -1f; out[o + 3] = t[0]; out[o + 4] = t[1]
+            o += 5
+            i += 3
+        }
+        return out
     }
 }

@@ -150,7 +150,15 @@ class CinemaActivity : Activity(), LifecycleOwner {
                         val upright: Bitmap = image.toBitmap().rotate(image.imageInfo.rotationDegrees)
                         val timestamp = image.imageInfo.timestamp / 1_000_000L
                         trackingExecutor.execute {
-                            try { handTracker?.detect(upright, timestamp) } finally { upright.recycle(); busy.set(false) }
+                            try {
+                                handTracker?.detect(upright, timestamp)
+                                // The same frame shows the real hands in the cinema.
+                                renderer.handFrame(upright)
+                            } catch (error: Throwable) {
+                                upright.recycle()
+                            } finally {
+                                busy.set(false)
+                            }
                         }
                     }
                 } catch (error: Throwable) {

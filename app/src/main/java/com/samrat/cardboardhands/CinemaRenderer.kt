@@ -29,8 +29,18 @@ class CinemaRenderer(
 
     /** Up to two cursors, one per hand; written by the hand thread. */
     @Volatile var cursors: List<Cursor> = emptyList()
-    /** See-through hands in head space, drawn over everything like in the VR home. */
+    /** The user's real hands (camera picture cut to the hand shape) in head space, over everything. */
     @Volatile var ghosts: List<FloatArray> = emptyList()
+    private var handFrame: android.graphics.Bitmap? = null
+    private val handFrameLock = Any()
+    private var handTexture = 0
+    private var hasHandTexture = false
+
+    /** The camera picture the hands are cut from; the newest replaces the last. */
+    fun handFrame(bitmap: android.graphics.Bitmap) = synchronized(handFrameLock) {
+        handFrame?.recycle()
+        handFrame = bitmap
+    }
     /** Minecraft VR: the screen stays in front of the eyes, the head turns the game's camera instead. */
     @Volatile var headLocked = false
     /** Where the screen is, for hit tests from the hand thread (centre y, z, width). */
@@ -65,7 +75,13 @@ class CinemaRenderer(
         colorProgram = program(COLOR_VERTEX, COLOR_FRAGMENT)
         screenProgram = program(SCREEN_VERTEX, SCREEN_FRAGMENT)
         cursorProgram = program(SCREEN_VERTEX, CURSOR_FRAGMENT)
-        ghostProgram = program(GHOST_VERTEX, GHOST_FRAGMENT)
+        ghostProgram = program(SCREEN_VERTEX, HAND_FRAGMENT)
+        handTexture = IntArray(1).also { GLES20.glGenTextures(1, it, 0) }[0]
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, handTexture)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
         screenTexture = textures[0]
@@ -195,10 +211,19 @@ class CinemaRenderer(
         GLES20.glDisable(GLES20.GL_BLEND)
     }
 
-    /** Hands in head space: blended once per pixel thanks to the depth test on one flat plane. */
+    /** Real hands in head space, cut out of the newest camera picture. */
     private fun drawGhosts() {
+        synchronized(handFrameLock) {
+            handFrame?.let { bitmap ->
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, handTexture)
+                android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+                bitmap.recycle()
+                handFrame = null
+                hasHandTexture = true
+            }
+        }
         val list = ghosts
-        if (list.isEmpty()) return
+        if (list.isEmpty() || !hasHandTexture) return
         val mvp = FloatArray(16)
         Matrix.multiplyMM(mvp, 0, projection, 0, eye, 0)
         GLES20.glClear(GLES20.GL_DEPTH_BUFFER_BIT)
@@ -207,13 +232,21 @@ class CinemaRenderer(
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
         GLES20.glUseProgram(ghostProgram)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, handTexture)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(ghostProgram, "uTexture"), 0)
         GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(ghostProgram, "uMvp"), 1, false, mvp, 0)
         val position = GLES20.glGetAttribLocation(ghostProgram, "aPosition")
+        val uv = GLES20.glGetAttribLocation(ghostProgram, "aUv")
         for (triangles in list) {
             val buffer = floatBuffer(triangles)
-            GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, 12, buffer)
+            buffer.position(0)
+            GLES20.glVertexAttribPointer(position, 3, GLES20.GL_FLOAT, false, 20, buffer)
             GLES20.glEnableVertexAttribArray(position)
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, triangles.size / 3)
+            buffer.position(3)
+            GLES20.glVertexAttribPointer(uv, 2, GLES20.GL_FLOAT, false, 20, buffer)
+            GLES20.glEnableVertexAttribArray(uv)
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, triangles.size / 5)
         }
         GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glEnable(GLES20.GL_CULL_FACE)
@@ -398,9 +431,11 @@ class CinemaRenderer(
             uniform mat4 uMvp;
             attribute vec3 aPosition;
             void main() { gl_Position = uMvp * vec4(aPosition, 1.0); }"""
-        private const val GHOST_FRAGMENT = """
+        private const val HAND_FRAGMENT = """
             precision mediump float;
-            void main() { gl_FragColor = vec4(0.93, 0.95, 1.0, 0.38); }"""
+            uniform sampler2D uTexture;
+            varying vec2 vUv;
+            void main() { gl_FragColor = vec4(texture2D(uTexture, vUv).rgb, 1.0); }"""
         private const val CURSOR_FRAGMENT = """
             precision mediump float;
             uniform float uPressed;
