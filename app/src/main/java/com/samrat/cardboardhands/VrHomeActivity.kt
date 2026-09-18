@@ -212,6 +212,10 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         JoyConBridge.watch(this, watching = true, learning = false)
         CinemaActivity.setJoyConPassthrough(this, false)
         loadApps()
+        Calls.localHands = { handPoints }
+        Calls.unlisten(callListener)
+        Calls.listen(callListener)
+        thread(name = "PhoneXR calls start") { Calls.start(this) }
     }
 
     override fun onPause() {
@@ -227,6 +231,8 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     }
 
     override fun onDestroy() {
+        Calls.unlisten(callListener)
+        Calls.stop()
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         windows.forEach { it.content.release() }
         ar?.close()
@@ -282,6 +288,38 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_PERSONA) onboarding?.personaDone()
+    }
+
+    private fun openCalls() = runOnUiThread { openWindow("calls", "Звонки", ID_CALLS) { CallContent(this) } }
+
+    /** An incoming call brings the Calls window up wherever the user is. */
+    private val callListener: () -> Unit = {
+        if (Calls.state == Calls.State.RINGING && windows.none { it.id == "calls" && !it.minimized }) openCalls()
+    }
+
+    private val storeHost = object : StoreContent.Host {
+        override fun openCinema(packageName: String, scene: String) = runOnUiThread {
+            if (VirtualScreen.access() != VirtualScreen.Access.READY) return@runOnUiThread toast("Запустите Shizuku и разрешите доступ PhoneXR")
+            startActivity(Intent(this@VrHomeActivity, CinemaActivity::class.java)
+                .putExtra(CinemaActivity.EXTRA_PACKAGE, packageName).putExtra(CinemaActivity.EXTRA_SCENE, scene))
+        }
+
+        override fun openWebApp(app: WebApps.App) = runOnUiThread {
+            openWindow("web:${app.url}", app.name, "web:${app.url}") { BrowserContent(app.url, ::openWebXr) }
+        }
+
+        override fun openCalls() = this@VrHomeActivity.openCalls()
+
+        override fun install(file: java.io.File) = runOnUiThread {
+            if (!packageManager.canRequestPackageInstalls()) return@runOnUiThread toast("Разрешите PhoneXR устанавливать приложения")
+            val content = androidx.core.content.FileProvider.getUriForFile(this@VrHomeActivity, "$packageName.patched.apks", file)
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(content, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+
+        override fun homeChanged() = loadApps()
+
+        override fun message(text: String) = toast(text)
     }
 
     /** "Straight ahead" and "here" become the current head direction and spot. */
@@ -341,6 +379,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                 HomePanel.Entry(ID_PHOTOS, "Фото", drawPhotosIcon()),
                 HomePanel.Entry(ID_SETTINGS, "Настройки", symbolIcon("⚙", Color.rgb(142, 142, 147))),
                 HomePanel.Entry(ID_STORE, "Магазин", drawStoreIcon()),
+                HomePanel.Entry(ID_CALLS, "Звонки", symbolIcon("✆", Color.rgb(48, 209, 88))),
             ) + if (AndroidAppsContent.enabled(this)) listOf(HomePanel.Entry(ID_ANDROID, "Android", symbolIcon("▦", Color.rgb(61, 220, 132)))) else emptyList()
             val vr = found.map {
                 HomePanel.Entry("app:${it.packageName}", it.label, runCatching { packageManager.getApplicationIcon(it.packageName) }.getOrNull())
@@ -390,7 +429,8 @@ class VrHomeActivity : Activity(), LifecycleOwner {
                     openWindow("minecraft", "Minecraft", ID_MINECRAFT) { ShizukuAppContent(MINECRAFT) { toast(it) } }
                 }
             }
-            id == ID_STORE -> switchMode(HomePanel.Mode.STORE)
+            id == ID_STORE -> openWindow("store", "Магазин", ID_STORE) { StoreContent(this, storeHost) }
+            id == ID_CALLS -> openCalls()
             id.startsWith("app:") -> launchGame(id.removePrefix("app:"))
             id.startsWith("web:") -> id.removePrefix("web:").let { url -> openWindow("web:$url", entry.label, id) { BrowserContent(url, ::openWebXr) } }
             id.startsWith("dock:") -> windows.firstOrNull { it.id == id.removePrefix("dock:") }?.let { restore(it) }
@@ -1538,6 +1578,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         private const val REQUEST_PERSONA = 42
         private const val ID_SETTINGS = "own:settings"
         private const val ID_ANDROID = "own:android"
+        private const val ID_CALLS = "own:calls"
         private const val ID_PERSONA = "own:persona"
         private const val KEYBOARD_W = 1.7f
         private val KEYBOARD_H = KEYBOARD_W * KeyboardPanel.HEIGHT / KeyboardPanel.WIDTH

@@ -32,6 +32,8 @@ class Voice(private val context: Context) {
         private set
     @Volatile var talking = false
         private set
+    /** Every 20 ms of cleaned microphone sound, e.g. for a call. */
+    @Volatile var onPcm: ((ShortArray, Int) -> Unit)? = null
 
     @Volatile private var running = false
     private var thread: Thread? = null
@@ -91,6 +93,7 @@ class Voice(private val context: Context) {
         while (running) {
             val read = record.read(frame, 0, FRAME)
             if (read <= 0) continue
+            onPcm?.invoke(frame, read)
             // Slide the one-second window YAMNet looks at.
             System.arraycopy(window, read, window, 0, WINDOW - read)
             for (i in 0 until read) window[WINDOW - read + i] = frame[i] / 32768f
@@ -144,5 +147,27 @@ class Voice(private val context: Context) {
         const val WINDOW = 15_600
         val SPEECH = setOf("Speech", "Conversation", "Narration, monologue", "Male speech, man speaking",
             "Female speech, woman speaking", "Child speech, kid speaking", "Singing")
+    }
+}
+
+/** One microphone for everyone who needs the voice (the Persona window and calls). */
+object VoiceHub {
+    private var voice: Voice? = null
+    private var users = 0
+
+    @Synchronized
+    fun acquire(context: Context): Voice {
+        users++
+        return voice ?: Voice(context.applicationContext).also { voice = it; it.start() }
+    }
+
+    @Synchronized
+    fun release() {
+        users--
+        if (users <= 0) {
+            users = 0
+            voice?.stop()
+            voice = null
+        }
     }
 }

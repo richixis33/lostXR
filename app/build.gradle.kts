@@ -72,6 +72,8 @@ dependencies {
     implementation("com.google.mediapipe:tasks-audio:0.10.35")
     // 6DoF in the VR home: ARCore tracks where the headset is in the room.
     implementation("com.google.ar:core:1.47.0")
+    // Calls: Supabase Realtime over a WebSocket.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.android.tools.build:apksig:8.7.3")
     implementation("com.google.android.material:material:1.12.0")
     // ArUco markers on the Joy-Con for camera tracking.

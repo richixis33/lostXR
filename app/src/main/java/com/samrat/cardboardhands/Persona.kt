@@ -218,71 +218,37 @@ object Delaunay {
  * The live portrait window: blinks every few seconds and speaks with the user's voice. The face is
  * warped on the CPU (drawVertices with the portrait as texture) and handed to the VR home as a bitmap.
  */
-class PersonaContent(private val context: Context) : VrWindow.Content {
-    override val pixelWidth = Persona.SIZE
-    override val pixelHeight = Persona.SIZE
-    override val external = false
-    private val face = Persona.load(context)
-    private val frame = Bitmap.createBitmap(Persona.SIZE, Persona.SIZE, Bitmap.Config.ARGB_8888)
-    private val canvas = Canvas(frame)
-    @Volatile private var fresh = false
-    @Volatile private var running = true
-    private var voice: Voice? = null
+/** Blinks like people do: every 2.5–6 s, sometimes twice quickly. */
+class Blinker {
+    private val random = java.util.Random()
+    private var nextBlink = System.nanoTime() + 2_000_000_000L
+    private var blinkStart = 0L
 
-    override fun attach(context: Context, texture: SurfaceTexture?, onReady: () -> Unit) {
-        voice = Voice(context).also { it.start() }
-        kotlin.concurrent.thread(name = "PhoneXR persona") {
-            val random = java.util.Random()
-            var nextBlink = System.nanoTime() + 2_000_000_000L
-            var blinkStart = 0L
-            while (running) {
-                val now = System.nanoTime()
-                if (now > nextBlink) {
-                    blinkStart = now
-                    // A blink every 2.5–6 s, like people do; sometimes a quick double blink.
-                    nextBlink = now + (2_500_000_000L + random.nextInt(3_500) * 1_000_000L) +
-                        if (random.nextInt(6) == 0) -2_200_000_000L else 0L
-                }
-                val t = (now - blinkStart) / 1e9f
-                val blink = if (t < .16f) (if (t < .07f) t / .07f else 1f - (t - .07f) / .09f).coerceIn(0f, 1f) else 0f
-                val v = voice
-                draw(blink, v?.mouthOpen ?: 0f, v?.mouthRound ?: .5f)
-                Thread.sleep(33)
-            }
+    /** How closed the eyes are right now, 0..1. */
+    fun value(now: Long = System.nanoTime()): Float {
+        if (now > nextBlink) {
+            blinkStart = now
+            nextBlink = now + (2_500_000_000L + random.nextInt(3_500) * 1_000_000L) +
+                if (random.nextInt(6) == 0) -2_200_000_000L else 0L
         }
-        onReady()
+        val t = (now - blinkStart) / 1e9f
+        return if (t < .16f) (if (t < .07f) t / .07f else 1f - (t - .07f) / .09f).coerceIn(0f, 1f) else 0f
     }
+}
 
-    override fun takeBitmap(): Bitmap? = if (fresh) synchronized(this) { fresh = false; frame } else null
-
-    override fun toolbarTitle(): String = when (voice?.talking) {
-        true -> "Лицо · говорит"
-        else -> if (face == null) "Лицо не создано" else "Лицо"
-    }
-
-    override val toolbarVersion get() = if (voice?.talking == true) 1 else 0
-
-    override fun touch(action: Int, u: Float, v: Float) = Unit
-
-    override fun release() {
-        running = false
-        voice?.stop()
-    }
-
+/**
+ * Draws a Persona with closed-to-open eyes and mouth: the face is warped on the CPU (drawVertices
+ * with the portrait as texture). Used by the Persona window and by calls.
+ */
+class PersonaRenderer(private val face: Persona.Face) {
+    val frame: Bitmap = Bitmap.createBitmap(Persona.SIZE, Persona.SIZE, Bitmap.Config.ARGB_8888)
+    private val canvas = Canvas(frame)
     private val shaderPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val mouthPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     @Synchronized
-    private fun draw(blink: Float, open: Float, round: Float) {
+    fun render(blink: Float, open: Float, round: Float): Bitmap {
         val f = face
-        if (f == null) {
-            canvas.drawColor(Color.rgb(60, 60, 66))
-            mouthPaint.color = Color.WHITE
-            mouthPaint.textSize = 40f
-            canvas.drawText("Добавьте лицо в Настройках", 150f, Persona.SIZE / 2f, mouthPaint)
-            fresh = true
-            return
-        }
         if (shaderPaint.shader == null) shaderPaint.shader = BitmapShader(f.image, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
         val base = f.allPoints
         val moved = base.copyOf()
@@ -350,6 +316,48 @@ class PersonaContent(private val context: Context) : VrWindow.Content {
             Canvas.VertexMode.TRIANGLES, moved.size, moved, 0, base, 0, null, 0,
             indices, 0, indices.size, shaderPaint
         )
-        fresh = true
+        return frame
+    }
+}
+
+/** The live portrait window: blinks by itself and speaks with the user's voice. */
+class PersonaContent(private val context: Context) : VrWindow.Content {
+    override val pixelWidth = Persona.SIZE
+    override val pixelHeight = Persona.SIZE
+    override val external = false
+    private val renderer = Persona.load(context)?.let { PersonaRenderer(it) }
+    @Volatile private var latest: Bitmap? = null
+    @Volatile private var running = true
+    private var voice: Voice? = null
+
+    override fun attach(context: Context, texture: SurfaceTexture?, onReady: () -> Unit) {
+        voice = VoiceHub.acquire(context)
+        kotlin.concurrent.thread(name = "PhoneXR persona") {
+            val blinker = Blinker()
+            while (running) {
+                val v = voice
+                latest = renderer?.render(blinker.value(), v?.mouthOpen ?: 0f, v?.mouthRound ?: .5f)
+                    ?: Bitmap.createBitmap(Persona.SIZE, Persona.SIZE, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(60, 60, 66)) }
+                Thread.sleep(33)
+            }
+        }
+        onReady()
+    }
+
+    override fun takeBitmap(): Bitmap? = latest.also { latest = null }
+
+    override fun toolbarTitle(): String = when (voice?.talking) {
+        true -> "Лицо · говорит"
+        else -> if (renderer == null) "Лицо не создано" else "Лицо"
+    }
+
+    override val toolbarVersion get() = if (voice?.talking == true) 1 else 0
+
+    override fun touch(action: Int, u: Float, v: Float) = Unit
+
+    override fun release() {
+        running = false
+        if (voice != null) VoiceHub.release()
+        voice = null
     }
 }

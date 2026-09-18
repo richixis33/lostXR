@@ -599,6 +599,7 @@ class MainActivity : ComponentActivity() {
                 HigRow("Сервер", GameStore.URL_BASE.removePrefix("https://"))
             }
             HigSection {
+                HigLink("Аккаунт", value = if (resumes >= 0) Account.current(this@MainActivity)?.name ?: "Войти" else null) { start(AccountActivity::class.java) }
                 HigLink("Обновление ПО") { start(UpdateActivity::class.java) }
                 HigLink("О приложении") { start(AboutActivity::class.java) }
             }
