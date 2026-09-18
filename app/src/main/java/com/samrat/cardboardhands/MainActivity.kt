@@ -533,6 +533,9 @@ class MainActivity : ComponentActivity() {
                 footer = tr("Дополнения, наборы ресурсов и миры для Minecraft Bedrock (.mcaddon, .mcpack, .mcworld). " +
                     "Minecraft сам импортирует мод, потом включите его в настройках мира.")
             ) {
+                HigLink("PhoneXR VR — VR для Minecraft", value = if (resumes >= 0 && MinecraftBridge.modInstalled(this@MainActivity)) "✓" else tr("Установить")) {
+                    MinecraftBridge.installMod(this@MainActivity)?.let { error = it }
+                }
                 HigLink(tr("Установить мод из файла")) { chooseMod.launch(arrayOf("*/*")) }
                 mods?.forEach { item ->
                     val progress = modProgress[item.path]
@@ -621,8 +624,10 @@ class MainActivity : ComponentActivity() {
                         (if (ready) "✓ " else "2. ") + "Установите и запустите Shizuku (через отладку по Wi‑Fi), разрешите доступ PhoneXR.",
                         "3. Нажмите «Играть»: игра откроется на большом экране — ${mode.scene}.",
                         if (mode.packageName == MINECRAFT)
-                            "4. Minecraft VR: поворот головы — камера, «пистолет» из пальцев — идти, кулак — ломать и бить, " +
-                                "щипок — поставить блок. В настройках Minecraft включите «Раздельное управление» (Split controls)."
+                            "4. Мод PhoneXR VR ставится в Minecraft сам при первом «Играть». В Minecraft: Настройки → Общие → " +
+                                "выключите «Требовать зашифрованные веб‑сокеты»; в мире включите читы и набор параметров поведения «PhoneXR VR». " +
+                                "В мире покажите ладонь к лицу и сведите пальцы — PhoneXR подключит мод. Дальше: голова — взгляд на 360°, " +
+                                "руки видны в мире, кулак — ломать и бить, щипок — поставить блок, «пистолет» из пальцев — идти."
                         else "4. Управление: щипок любой руки — нажатие по экрану, две руки — два пальца. " +
                             "Joy‑Con и геймпад работают как в самой игре. Тап по телефону выравнивает вид.",
                     ).joinToString("\n")
@@ -641,6 +646,11 @@ class MainActivity : ComponentActivity() {
                     else packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")?.let { startActivity(it) }
                         ?: startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=moe.shizuku.privileged.api")))
                 }) { CupertinoText("Shizuku") }
+                mode.packageName == MINECRAFT && !MinecraftBridge.modInstalled(this@MainActivity) -> default(onClick = {
+                    guide = null
+                    // First time: Minecraft imports the VR mod, then "Играть" starts VR.
+                    MinecraftBridge.installMod(this@MainActivity)?.let { error = it }
+                }) { CupertinoText(tr("Установить мод")) }
                 else -> default(onClick = {
                     guide = null
                     openCinema(mode.packageName, mode.sceneId)

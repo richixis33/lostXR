@@ -110,15 +110,23 @@ class CinemaActivity : Activity(), LifecycleOwner {
         hands?.minecraft = minecraft
         hands?.mask = HandProfile.mask(this)
         renderer.headLocked = minecraft
+        if (minecraft) {
+            MinecraftBridge.start()
+            hands?.onConnectGesture = { typeConnect() }
+        }
         if (minecraft) thread(name = "PhoneXR Minecraft look") {
             val head = FloatArray(16)
             var lastYaw = Float.NaN
             var lastPitch = 0f
+            var bridgeTick = 0
             while (running) {
                 tracker.copyHead(head)
                 val yaw = Math.toDegrees(kotlin.math.atan2(head[8], head[10]).toDouble()).toFloat()
                 val pitch = Math.toDegrees(kotlin.math.asin((-head[9]).coerceIn(-1f, 1f).toDouble())).toFloat()
-                if (!lastYaw.isNaN() && displayId >= 0) {
+                // With the mod linked, the head and hands go to it; otherwise the touch controls drive the camera.
+                if (MinecraftBridge.connected) {
+                    if (++bridgeTick % 3 == 0) hands?.let { MinecraftBridge.sendPose(yaw, pitch, it.bridgeHands) }
+                } else if (!lastYaw.isNaN() && displayId >= 0) {
                     var dy = yaw - lastYaw
                     if (dy > 180f) dy -= 360f
                     if (dy < -180f) dy += 360f
@@ -153,11 +161,8 @@ class CinemaActivity : Activity(), LifecycleOwner {
                         trackingExecutor.execute {
                             try {
                                 handTracker?.detect(upright, timestamp)
-                                // The same frame shows the real hands in the cinema.
-                                renderer.handFrame(upright)
-                            } catch (error: Throwable) {
-                                upright.recycle()
                             } finally {
+                                upright.recycle()
                                 busy.set(false)
                             }
                         }
@@ -196,6 +201,7 @@ class CinemaActivity : Activity(), LifecycleOwner {
 
     override fun onDestroy() {
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+        MinecraftBridge.stop()
         cameraExecutor.shutdownNow()
         trackingExecutor.execute { handTracker?.close() }
         trackingExecutor.shutdown()
@@ -258,6 +264,30 @@ class CinemaActivity : Activity(), LifecycleOwner {
             return true
         }
         return super.dispatchGenericMotionEvent(event)
+    }
+
+    /** Types "/connect localhost:19144" into Minecraft's chat on the virtual screen, then Enter. */
+    private fun typeConnect() {
+        val id = displayId
+        val shell = service ?: return
+        if (id < 0 || MinecraftBridge.connected) return
+        thread {
+            val map = android.view.KeyCharacterMap.load(android.view.KeyCharacterMap.VIRTUAL_KEYBOARD)
+            fun press(code: Int) {
+                val now = android.os.SystemClock.uptimeMillis()
+                runCatching { shell.injectKey(KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0), id) }
+                runCatching { shell.injectKey(KeyEvent(now, now, KeyEvent.ACTION_UP, code, 0), id) }
+            }
+            press(KeyEvent.KEYCODE_SLASH)
+            Thread.sleep(600)
+            map.getEvents(MinecraftBridge.CONNECT.removePrefix("/").toCharArray())?.forEach { event ->
+                runCatching { shell.injectKey(event, id) }
+                Thread.sleep(8)
+            }
+            Thread.sleep(150)
+            press(KeyEvent.KEYCODE_ENTER)
+            toast("Подключаю мод PhoneXR VR…")
+        }
     }
 
     private fun toast(text: String) = runOnUiThread { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }

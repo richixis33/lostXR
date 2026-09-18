@@ -83,6 +83,7 @@ object L10n {
         "Моды Minecraft" to arrayOf("Minecraft mods", "Mods do Minecraft", "Mods do Minecraft"),
         "Установить мод из файла" to arrayOf("Install a mod from a file", "Instalar mod de um arquivo", "Instalar mod a partir de ficheiro"),
         "Установить" to arrayOf("Install", "Instalar", "Instalar"),
+        "Установить мод" to arrayOf("Install mod", "Instalar mod", "Instalar mod"),
         "Пока пусто" to arrayOf("Nothing here yet", "Nada aqui ainda", "Ainda vazio"),
         "Загрузка…" to arrayOf("Loading…", "Carregando…", "A carregar…"),
         // VR home

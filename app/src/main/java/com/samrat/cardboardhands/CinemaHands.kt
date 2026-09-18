@@ -70,6 +70,23 @@ class CinemaHands(
         val othersCurled = intArrayOf(12, 16, 20).zip(intArrayOf(10, 14, 18)).all { (tip, pip) -> d(0, tip) < d(0, pip) * 1.05f }
         val thumbOut = d(4, 5) > shape.palmWidth * .55f
         val gun = indexOut && othersCurled && thumbOut
+        val pinching = hand.latch.update(shape)
+        // For the PhoneXR VR mod: where the hand is around the head (metres) and what it does.
+        val palm = intArrayOf(0, 5, 9, 17)
+        val tx = palm.map { (points[it].x() - .5f) * 2f * TAN_X }.average().toFloat()
+        val ty = palm.map { (.5f - points[it].y()) * 2f * TAN_Y }.average().toFloat()
+        val palmTan = kotlin.math.hypot((points[5].x() - points[17].x()) * 2f * TAN_X, (points[5].y() - points[17].y()) * 2f * TAN_Y)
+        val distance = (PALM_WIDTH_M / palmTan.coerceAtLeast(.01f)).coerceIn(.2f, .8f)
+        val bits = (if (shape.fist) 1 else 0) or (if (gun) 2 else 0) or (if (pinching) 4 else 0)
+        bridgeHands[hand.pointerId] = floatArrayOf(tx * distance, ty * distance, distance, bits.toFloat())
+        // Palm toward the face + pinch: PhoneXR types "/connect" into Minecraft for the mod.
+        if (pinching && !hand.down && shape.palmToFace) { hand.down = true; onConnectGesture(); return }
+        if (MinecraftBridge.connected) {
+            // The mod plays; the touch controls stay off.
+            touch.releaseAll()
+            hand.down = pinching
+            return
+        }
         val walkId = WALK
         val mineId = MINE + hand.pointerId
         val useId = USE + hand.pointerId
@@ -78,12 +95,17 @@ class CinemaHands(
         if (!gun && walker === hand && touch.isDown(walkId)) { touch.up(walkId); walker = null }
         if (shape.fist && !touch.isDown(mineId)) touch.down(mineId, MINE_X, MINE_Y)
         if (!shape.fist && touch.isDown(mineId)) touch.up(mineId)
-        val pinching = hand.latch.update(shape)
         if (pinching && !hand.down) { hand.down = true; touch.down(useId, MINE_X + 40f, MINE_Y); touch.up(useId) }
         if (!pinching) hand.down = false
     }
 
     private var walker: Hand? = null
+
+    /** Latest hands for the Minecraft mod: [x, y, z, bits] per hand (left, right), null when unseen. */
+    val bridgeHands = arrayOfNulls<FloatArray>(2)
+
+    /** Called when the user asks to link the mod (palm toward the face + pinch). */
+    @Volatile var onConnectGesture: () -> Unit = {}
 
     /** Left hand is pointer 0, right hand pointer 1. */
     private val hands = mapOf(true to Hand(0), false to Hand(1))
@@ -136,6 +158,7 @@ class CinemaHands(
         // A hand that left the camera lets go of the screen.
         for (hand in hands.values) {
             if (!hand.seen && minecraft) {
+                bridgeHands[hand.pointerId] = null
                 touch.up(MINE + hand.pointerId)
                 if (walker === hand) { touch.up(WALK); walker = null }
                 hand.down = false
@@ -234,6 +257,8 @@ class CinemaHands(
         const val MINE_X = 1100f
         const val MINE_Y = 620f
         const val PIXELS_PER_DEGREE = 12f
+        /** A grown-up palm is about this wide: its size in the picture gives the hand's distance. */
+        const val PALM_WIDTH_M = .08f
         const val TAN_Y = .72f
     }
 }

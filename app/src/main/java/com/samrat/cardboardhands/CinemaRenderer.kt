@@ -145,7 +145,6 @@ class CinemaRenderer(
                 drawScreen(viewProjection, place[2], place[0], place[1])
                 drawCursors(viewProjection, place[2], place[0], place[1])
             }
-            drawGhosts()
         }
     }
 
@@ -377,7 +376,8 @@ class CinemaRenderer(
     }
 
     companion object {
-        private const val HEAD_SCREEN_WIDTH = 2.6f
+        /** Wide enough to fill the view (~92°): with Minecraft's FOV near 90 it feels like being inside. */
+        private const val HEAD_SCREEN_WIDTH = 3.9f
         private const val HEAD_SCREEN_DISTANCE = 1.9f
         const val SCREEN_PIXELS_W = 1920
         const val SCREEN_PIXELS_H = 1080
