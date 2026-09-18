@@ -211,6 +211,32 @@ class MainActivity : ComponentActivity() {
     private val enterVr = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         startActivity(Intent(this, VrHomeActivity::class.java))
     }
+    /** A Minecraft mod from the phone's files. */
+    private val chooseMod = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) Thread {
+            val problem = runCatching { MinecraftMods.installFromUri(this, uri) }.getOrElse { it.message }
+            runOnUiThread { if (problem != null) error = problem }
+        }.start()
+    }
+    private var mods by mutableStateOf<List<GameStore.Item>?>(null)
+    private val modProgress = mutableStateMapOf<String, Int>()
+
+    private fun installMod(item: GameStore.Item) {
+        modProgress[item.path] = 0
+        Thread {
+            val file = runCatching {
+                GameStore.download(item, MinecraftMods.folder(this)) { value ->
+                    runOnUiThread { modProgress[item.path] = (value * 100).toInt().coerceAtLeast(0) }
+                }
+            }
+            runOnUiThread {
+                modProgress.remove(item.path)
+                file.onSuccess { MinecraftMods.install(this, it)?.let { problem -> error = problem } }
+                    .onFailure { error = "«${item.title}» не скачался" }
+            }
+        }.start()
+    }
+
     private val chooseApk = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) patch(uri, replaces = null)
     }
@@ -502,6 +528,17 @@ class MainActivity : ComponentActivity() {
                     AndroidAppsContent.setEnabled(this@MainActivity, !added)
                 }
             }
+            HigSection(
+                title = tr("Моды Minecraft"),
+                footer = tr("Дополнения, наборы ресурсов и миры для Minecraft Bedrock (.mcaddon, .mcpack, .mcworld). " +
+                    "Minecraft сам импортирует мод, потом включите его в настройках мира.")
+            ) {
+                HigLink(tr("Установить мод из файла")) { chooseMod.launch(arrayOf("*/*")) }
+                mods?.forEach { item ->
+                    val progress = modProgress[item.path]
+                    HigLink(item.title, value = progress?.let { "$it%" } ?: tr("Установить"), enabled = progress == null) { installMod(item) }
+                }
+            }
             val items = storeItems
             HigSection(
                 title = tr("Игры"),
@@ -669,6 +706,8 @@ class MainActivity : ComponentActivity() {
         Thread {
             try {
                 val items = GameStore.list()
+                val foundMods = runCatching { GameStore.mods() }.getOrDefault(emptyList())
+                runOnUiThread { mods = foundMods }
                 val web = WebApps.fromStore()
                 runOnUiThread {
                     webApps = web

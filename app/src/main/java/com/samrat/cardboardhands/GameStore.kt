@@ -90,6 +90,34 @@ object GameStore {
             }
     }
 
+    /**
+     * Network call: Minecraft mods from the store's "minecraft_mods" folder (.mcaddon, .mcpack,
+     * .mcworld, .mctemplate), plus link files there (JSON with "name" and "url") for big ones.
+     */
+    fun mods(): List<Item> {
+        val location = found ?: locate()
+        val folder = location.prefix + MinecraftMods.FOLDER + "/"
+        val entries = runCatching { listFolder(location.bucket, folder) }.getOrDefault(emptyList())
+        val items = ArrayList<Item>()
+        for (entry in entries) {
+            val name = entry.getString("name")
+            if (entry.isNull("id")) continue
+            when {
+                MinecraftMods.isMod(name) -> items += Item(
+                    title = name.substringBeforeLast('.').replace('_', ' '),
+                    path = folder + name,
+                    bucket = location.bucket,
+                    size = entry.size(),
+                    iconPath = null,
+                    descriptionPath = null,
+                )
+                entry.fileExtension() == "json" -> link(location.bucket, folder + name, name.substringBeforeLast('.'))
+                    ?.takeIf { MinecraftMods.isMod(it.url?.substringBefore('?') ?: "") }?.let { items += it }
+            }
+        }
+        return items.sortedBy { it.title.lowercase() }
+    }
+
     private fun supabaseItems(): List<Item> {
         val location = found ?: locate()
         val items = mutableListOf<Item>()
@@ -177,7 +205,10 @@ object GameStore {
     fun download(item: Item, directory: File, onProgress: (Float) -> Unit): File {
         directory.mkdirs()
         directory.listFiles()?.forEach { it.delete() }
-        val target = File(directory, item.title.replace(Regex("[^\\p{L}\\p{N}._ -]"), "_") + "." + item.extension)
+        // Mods keep their own extension: Minecraft recognises them by it.
+        val extension = (item.url?.substringBefore('?') ?: item.path).substringAfterLast('.', "").lowercase()
+            .takeIf { MinecraftMods.isMod("x.$it") } ?: item.extension
+        val target = File(directory, item.title.replace(Regex("[^\\p{L}\\p{N}._ -]"), "_") + "." + extension)
         val source = item.url?.let { openUrl(it) } ?: open(item.bucket, item.path)
         source.use { response ->
             val total = response.connection.contentLengthLong.takeIf { it > 0 } ?: item.size

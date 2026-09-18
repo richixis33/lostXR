@@ -54,6 +54,7 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
     private var loading = true
     private val progress = HashMap<String, Int>()
     private val icons = HashMap<String, Bitmap>()
+    private var mods = emptyList<GameStore.Item>()
 
     override fun attach(context: Context, texture: SurfaceTexture?, onReady: () -> Unit) {
         thread {
@@ -62,6 +63,7 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
             onReady()
             val games = runCatching { GameStore.list() }.getOrDefault(emptyList())
             val web = runCatching { WebApps.fromStore() }.getOrDefault(emptyList())
+            mods = runCatching { GameStore.mods() }.getOrDefault(emptyList())
             loading = false
             build(games, web)
             draw()
@@ -125,6 +127,24 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
                 if (file != null) host.install(file) else host.message("«${item.title}» не скачалась")
             }
         }
+        val modCards = mods.map { item ->
+            Card(item.title, item.path.substringAfterLast('.').uppercase() + if (item.size > 0) " · " + Updates.formatSize(item.size) else "",
+                { appIcon(MinecraftMods.MINECRAFT) }, { progress[item.path]?.let { "$it%" } ?: tr("Установить") }) {
+                if (progress.containsKey(item.path)) return@Card
+                progress[item.path] = 0
+                draw()
+                val activity = context as? android.app.Activity
+                val file = runCatching {
+                    GameStore.download(item, File(context.cacheDir, "patched/mods")) { value ->
+                        val percent = (value * 100).toInt().coerceAtLeast(0)
+                        if (percent != progress[item.path]) { progress[item.path] = percent; if (percent % 5 == 0) draw() }
+                    }
+                }.getOrNull()
+                progress.remove(item.path)
+                val problem = if (file != null && activity != null) MinecraftMods.install(activity, file) else "«${item.title}» не скачался"
+                if (problem != null) host.message(problem) else host.message(tr("Мод открыт в Minecraft: подтвердите импорт"))
+            }
+        }
         val webCards = web.map { app ->
             Card(app.name, app.url.removePrefix("https://").substringBefore('/'), { WebApps.icon(app) },
                 { if (WebApps.installed(context).any { it.url == app.url }) tr("Открыть") else tr("Добавить") }) {
@@ -136,6 +156,7 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
             Section(tr("VR‑режимы"), modes),
             Section(tr("Приложения PhoneXR"), apps),
             Section(if (loading) "Игры · загрузка…" else tr("Игры"), gameCards).takeIf { loading || gameCards.isNotEmpty() },
+            Section(tr("Моды Minecraft"), modCards).takeIf { modCards.isNotEmpty() },
             Section(tr("Веб‑приложения"), webCards).takeIf { webCards.isNotEmpty() },
         )
     }

@@ -80,6 +80,9 @@ object L10n {
         "Приложения PhoneXR" to arrayOf("PhoneXR apps", "Apps PhoneXR", "Apps PhoneXR"),
         "Android‑приложения" to arrayOf("Android apps", "Apps Android", "Apps Android"),
         "Веб‑приложения" to arrayOf("Web apps", "Apps web", "Apps web"),
+        "Моды Minecraft" to arrayOf("Minecraft mods", "Mods do Minecraft", "Mods do Minecraft"),
+        "Установить мод из файла" to arrayOf("Install a mod from a file", "Instalar mod de um arquivo", "Instalar mod a partir de ficheiro"),
+        "Установить" to arrayOf("Install", "Instalar", "Instalar"),
         "Пока пусто" to arrayOf("Nothing here yet", "Nada aqui ainda", "Ainda vazio"),
         "Загрузка…" to arrayOf("Loading…", "Carregando…", "A carregar…"),
         // VR home
