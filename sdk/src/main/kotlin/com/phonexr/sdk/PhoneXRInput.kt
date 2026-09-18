@@ -31,7 +31,13 @@ class PhoneXRInput(port: Int = 42425) : AutoCloseable {
         val qz: Float = 0f,
         val qw: Float = 1f,
         /** Набор битов Button: какие кнопки Joy-Con нажаты. */
-        val buttons: Int = 0
+        val buttons: Int = 0,
+        /** Стик Joy-Con, от -1 до 1 (x вправо, y вверх). В PH4 всегда 0. */
+        val stickX: Float = 0f,
+        val stickY: Float = 0f,
+        /** Щипок (большой и указательный вместе) и ладонь к лицу. В PH4 всегда false. */
+        val pinch: Boolean = false,
+        val palmToFace: Boolean = false
     ) {
         fun isPressed(button: Button) = buttons and button.bit != 0
     }
@@ -72,8 +78,42 @@ class PhoneXRInput(port: Int = 42425) : AutoCloseable {
 
     private fun parse(message: String): State? {
         val parts = message.trim().split(' ')
-        if (parts.firstOrNull() != "PH4" || parts.size < 26) return null
-        val values = parts.drop(1)
+        return when (parts.firstOrNull()) {
+            "PH5" -> if (parts.size >= 30) parse5(parts.drop(1)) else null
+            "PH4" -> if (parts.size >= 26) parse4(parts.drop(1)) else null
+            else -> null
+        }
+    }
+
+    /**
+     * PH5: у каждой руки ещё стик Joy-Con (14 значений на руку), затем флаги, затем щипок и
+     * ладонь к лицу для левой и правой руки.
+     */
+    private fun parse5(values: List<String>): State {
+        fun flag(index: Int) = values.getOrNull(index)?.toIntOrNull() == 1
+        fun hand(offset: Int, extra: Int) = Hand(
+            present = values[offset].toInt() != 0,
+            fist = values[offset + 1].toInt() != 0,
+            index = values[offset + 2].toInt() != 0,
+            thumb = values[offset + 3].toInt() != 0,
+            x = values[offset + 4].toFloat(),
+            y = values[offset + 5].toFloat(),
+            z = values[offset + 6].toFloat(),
+            qx = values[offset + 7].toFloat(),
+            qy = values[offset + 8].toFloat(),
+            qz = values[offset + 9].toFloat(),
+            qw = values[offset + 10].toFloat(),
+            buttons = values[offset + 11].toInt(),
+            stickX = values[offset + 12].toFloat(),
+            stickY = values[offset + 13].toFloat(),
+            pinch = flag(extra),
+            palmToFace = flag(extra + 1)
+        )
+        val flags = values[28].toInt()
+        return State(hand(0, 29), hand(14, 31), flags and 1 != 0, flags and 2 != 0)
+    }
+
+    private fun parse4(values: List<String>): State {
         fun hand(offset: Int) = Hand(
             present = values[offset].toInt() != 0,
             fist = values[offset + 1].toInt() != 0,

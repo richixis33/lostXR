@@ -34,6 +34,25 @@ class PhoneXRInputTest {
     }
 
     @Test
+    fun readsTheCurrentPh5Packet() {
+        // Левая рука щипает, правая: Joy-Con со стиком вперёд и ладонью к лицу.
+        val ph5 = "PH5 1 0 1 0 0.3000 0.4000 0.5000 0.00000 0.00000 0.00000 1.00000 0 0.000 0.000 " +
+            "1 0 0 0 0.7000 0.4000 0.6000 0.00000 0.00000 0.00000 1.00000 4 0.000 1.000 1 " +
+            "1 0 0 1"
+        PhoneXRInput(port = 42462).use { input ->
+            send(42462, ph5)
+            val state = requireNotNull(input.read())
+            assertTrue(state.left.pinch)
+            assertFalse(state.left.palmToFace)
+            assertTrue(state.left.index)
+            assertTrue(state.right.palmToFace)
+            assertEquals(1f, state.right.stickY, .0001f)
+            assertTrue(state.right.isPressed(PhoneXRInput.Button.TRIGGER))
+            assertTrue(state.sixDof)
+        }
+    }
+
+    @Test
     fun ignoresPacketsFromAnotherProtocolVersion() {
         PhoneXRInput(port = 42461).use { input ->
             send(42461, "PH2 1 0 0 0 0.5 0.5 0.5")

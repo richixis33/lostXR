@@ -44,6 +44,8 @@ struct phonexr_hand
 	float x, y, z;             /* ладонь в кадре: x, y в диапазоне 0..1, z — близость к камере */
 	float qx, qy, qz, qw;      /* поворот от Joy-Con, иначе единичный кватернион */
 	uint32_t buttons;
+	float stick_x, stick_y;    /* стик Joy-Con, -1..1 (PH5; в PH4 — 0) */
+	bool pinch, palm_to_face;  /* щипок и ладонь к лицу (PH5; в PH4 — false) */
 };
 
 struct phonexr_state
@@ -113,15 +115,29 @@ phonexr_input_poll(struct phonexr_input *input, struct phonexr_state *out_state)
 		struct phonexr_state parsed;
 		memset(&parsed, 0, sizeof(parsed));
 		int lp, lf, li, lt, lb, rp, rf, ri, rt, rb, fl;
+		int lpinch = 0, lpalm = 0, rpinch = 0, rpalm = 0;
 		struct phonexr_hand *l = &parsed.left;
 		struct phonexr_hand *r = &parsed.right;
+		/* PH5 (current): each hand also has the Joy-Con stick; pinch and palm-to-face at the end. */
 		int count = sscanf(packet,
-		                   "PH4 %d %d %d %d %f %f %f %f %f %f %f %d %d %d %d %d %f %f %f %f %f %f %f %d %d",
-		                   &lp, &lf, &li, &lt, &l->x, &l->y, &l->z, &l->qx, &l->qy, &l->qz, &l->qw, &lb,
-		                   &rp, &rf, &ri, &rt, &r->x, &r->y, &r->z, &r->qx, &r->qy, &r->qz, &r->qw, &rb, &fl);
-		if (count != 25) {
-			continue;
+		                   "PH5 %d %d %d %d %f %f %f %f %f %f %f %d %f %f %d %d %d %d %f %f %f %f %f %f %f %d %f %f %d %d %d %d %d",
+		                   &lp, &lf, &li, &lt, &l->x, &l->y, &l->z, &l->qx, &l->qy, &l->qz, &l->qw, &lb, &l->stick_x, &l->stick_y,
+		                   &rp, &rf, &ri, &rt, &r->x, &r->y, &r->z, &r->qx, &r->qy, &r->qz, &r->qw, &rb, &r->stick_x, &r->stick_y,
+		                   &fl, &lpinch, &lpalm, &rpinch, &rpalm);
+		if (count < 29) {
+			memset(&parsed, 0, sizeof(parsed));
+			count = sscanf(packet,
+			               "PH4 %d %d %d %d %f %f %f %f %f %f %f %d %d %d %d %d %f %f %f %f %f %f %f %d %d",
+			               &lp, &lf, &li, &lt, &l->x, &l->y, &l->z, &l->qx, &l->qy, &l->qz, &l->qw, &lb,
+			               &rp, &rf, &ri, &rt, &r->x, &r->y, &r->z, &r->qx, &r->qy, &r->qz, &r->qw, &rb, &fl);
+			if (count != 25) {
+				continue;
+			}
 		}
+		l->pinch = lpinch != 0;
+		l->palm_to_face = lpalm != 0;
+		r->pinch = rpinch != 0;
+		r->palm_to_face = rpalm != 0;
 		l->present = lp != 0;
 		l->fist = lf != 0;
 		l->index = li != 0;
