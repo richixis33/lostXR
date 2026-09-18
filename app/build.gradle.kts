@@ -23,6 +23,18 @@ android {
         aidl = true
     }
 
+    // One PhoneXR key everywhere (local builds, CI, patched games): games signed with it may start
+    // hand tracking through the signature permission START_HAND_TRACKING.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("src/main/assets/phonexr-signing.p12")
+            storeType = "pkcs12"
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
