@@ -450,7 +450,9 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             }
             id == ID_STORE -> openWindow("store", tr("Магазин"), ID_STORE) { StoreContent(this, storeHost) }
             id == ID_CALLS -> openCalls()
-            id == ID_ELIX -> openWindow("elix", "Elix", ID_ELIX) { ElixContent(this) }
+            id == ID_ELIX -> openWindow("elix", "Elix", ID_ELIX) {
+                ElixContent(this) { action -> runOnUiThread { openEntry(HomePanel.Entry(action, "", null)) } }
+            }
             id.startsWith("app:") -> launchGame(id.removePrefix("app:"))
             id.startsWith("web:") -> id.removePrefix("web:").let { url -> openWindow("web:$url", entry.label, id) { BrowserContent(url, ::openWebXr) } }
             id.startsWith("dock:") -> windows.firstOrNull { it.id == id.removePrefix("dock:") }?.let { restore(it) }

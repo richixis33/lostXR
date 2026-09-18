@@ -59,7 +59,11 @@ object Elix {
 }
 
 /** The Elix window: a glowing orb, the conversation, and buttons to speak or type. */
-class ElixContent(private val context: Context) : VrWindow.Content {
+class ElixContent(
+    private val context: Context,
+    /** Runs a quick command's action in the VR home (open an app, take a photo…). */
+    private val onCommand: (String) -> Unit = {},
+) : VrWindow.Content {
     override val pixelWidth = 1400
     override val pixelHeight = 1000
     override val external = false
@@ -125,6 +129,12 @@ class ElixContent(private val context: Context) : VrWindow.Content {
         input = ""
         typing = false
         history += Elix.Message(true, question)
+        // Quick commands answer at once, on the headset.
+        ElixCommands.answer(context, question)?.let { quick ->
+            history += Elix.Message(false, quick.text)
+            quick.action?.let(onCommand)
+            return
+        }
         thinking = true
         thread {
             val answer = Elix.ask(context, history)
@@ -169,9 +179,9 @@ class ElixContent(private val context: Context) : VrWindow.Content {
     private fun draw() {
         buttons.clear()
         bitmap.eraseColor(Color.TRANSPARENT)
-        paint.color = Color.argb(220, 16, 16, 22)
-        canvas.drawRoundRect(RectF(0f, 0f, pixelWidth.toFloat(), pixelHeight.toFloat()), 60f, 60f, paint)
-        orb()
+        // No panel: the sphere floats in the room, only the messages and buttons have backgrounds.
+        val big = history.isEmpty()
+        orb(pixelWidth / 2f, if (big) 400f else 140f, if (big) 300f else 110f)
         // The conversation, newest at the bottom.
         var y = 820f
         for (message in history.reversed()) {
@@ -185,14 +195,14 @@ class ElixContent(private val context: Context) : VrWindow.Content {
             lines.forEachIndexed { i, line -> text(line, left + 26f, y + 46f + i * 44f, 34f, Color.WHITE) }
             y -= 8f
         }
-        if (history.isEmpty() && !thinking) center(tr("Спросите Elix"), 560f, 52f)
+        if (big && !thinking && !listening && input.isEmpty()) pill(tr("Спросите Elix"), 790f, 40f)
         val status = when {
             listening -> tr("Слушаю…")
             thinking -> tr("Думаю…")
             input.isNotEmpty() -> input + if (typing) "|" else ""
             else -> null
         }
-        status?.let { center(it, 880f - 20f, 34f, Color.rgb(200, 200, 210)) }
+        status?.let { pill(it, 860f, 34f) }
         button(RectF(240f, 900f, 580f, 975f), tr("Говорить"), Color.rgb(10, 132, 255)) { listen() }
         button(RectF(610f, 900f, 910f, 975f), tr("Клавиатура"), Color.argb(90, 255, 255, 255)) { typing = true }
         if (input.isNotEmpty()) button(RectF(940f, 900f, 1180f, 975f), tr("Отправить"), Color.rgb(48, 209, 88)) { send() }
@@ -200,21 +210,78 @@ class ElixContent(private val context: Context) : VrWindow.Content {
         fresh = true
     }
 
-    /** Siri-like colours swirling around a white core; they swell with the voice. */
-    private fun orb() {
+    /**
+     * Elix as a glass sphere: grey and see-through, lit at the rim, with a rainbow wave of light
+     * floating inside. The wave breathes when idle, follows the voice while listening and ripples
+     * while thinking.
+     */
+    private fun orb(cx: Float, cy: Float, r: Float) {
         val t = (System.nanoTime() - start) / 1e9f
-        val cx = pixelWidth / 2f; val cy = 140f
-        val pulse = if (listening) .8f + level * .6f else if (thinking) 1f + .12f * sin(t * 6f) else 1f
-        val colors = intArrayOf(Color.rgb(255, 64, 160), Color.rgb(120, 90, 255), Color.rgb(40, 200, 255), Color.rgb(255, 150, 60))
-        colors.forEachIndexed { i, color ->
-            val angle = t * (if (thinking) 2.4f else 1f) + i * Math.PI.toFloat() / 2
-            val ox = cos(angle) * 26f * pulse; val oy = sin(angle) * 18f * pulse
-            paint.shader = RadialGradient(cx + ox, cy + oy, 95f * pulse, color, Color.TRANSPARENT, Shader.TileMode.CLAMP)
-            canvas.drawCircle(cx + ox, cy + oy, 110f * pulse, paint)
+        // Glass body.
+        paint.shader = RadialGradient(cx - r * .25f, cy - r * .3f, r * 1.25f,
+            intArrayOf(Color.argb(150, 150, 152, 158), Color.argb(170, 96, 98, 106), Color.argb(215, 58, 60, 68)),
+            floatArrayOf(0f, .6f, 1f), Shader.TileMode.CLAMP)
+        canvas.drawCircle(cx, cy, r, paint)
+        // Inner wave of rainbow light.
+        val energy = when {
+            listening -> .45f + level * .9f
+            thinking -> .75f + .25f * sin(t * 7f)
+            else -> .45f + .08f * sin(t * 1.6f)
         }
-        paint.shader = RadialGradient(cx, cy, 45f * pulse, Color.WHITE, Color.TRANSPARENT, Shader.TileMode.CLAMP)
-        canvas.drawCircle(cx, cy, 55f * pulse, paint)
+        val waveW = r * 1.25f
+        val waveH = r * .16f * energy
+        val path = android.graphics.Path()
+        val steps = 40
+        for (k in 0..steps) {
+            val x = cx - waveW / 2 + waveW * k / steps
+            val f = k.toFloat() / steps
+            val envelope = sin(f * Math.PI.toFloat())
+            val y = cy + sin(f * 6.3f + t * 2.2f) * waveH * .6f * envelope - envelope * waveH
+            if (k == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        for (k in steps downTo 0) {
+            val x = cx - waveW / 2 + waveW * k / steps
+            val f = k.toFloat() / steps
+            val envelope = sin(f * Math.PI.toFloat())
+            val y = cy + sin(f * 6.3f + t * 2.2f + .8f) * waveH * .6f * envelope + envelope * waveH * .7f
+            path.lineTo(x, y)
+        }
+        path.close()
+        val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.LinearGradient(cx - waveW / 2, 0f, cx + waveW / 2, 0f,
+                intArrayOf(Color.argb(0, 255, 60, 60), Color.rgb(255, 90, 70), Color.rgb(255, 205, 80), Color.rgb(120, 230, 140),
+                    Color.rgb(80, 200, 255), Color.rgb(140, 110, 255), Color.argb(0, 200, 90, 255)),
+                null, Shader.TileMode.CLAMP)
+            maskFilter = android.graphics.BlurMaskFilter(r * .09f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+            alpha = (180 + 60 * energy).toInt().coerceAtMost(255)
+        }
+        canvas.drawPath(path, glow)
+        // The bright core of the wave.
+        val core = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            maskFilter = android.graphics.BlurMaskFilter(r * .05f, android.graphics.BlurMaskFilter.Blur.NORMAL)
+            alpha = (150 * energy).toInt().coerceIn(40, 230)
+        }
+        canvas.drawOval(RectF(cx - waveW * .28f, cy - waveH * .35f, cx + waveW * .28f, cy + waveH * .45f), core)
+        // Rim light and a soft reflection, like glass.
         paint.shader = null
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = r * .03f
+        paint.color = Color.argb(120, 255, 255, 255)
+        canvas.drawCircle(cx, cy, r - paint.strokeWidth / 2, paint)
+        paint.style = Paint.Style.FILL
+        paint.shader = RadialGradient(cx - r * .35f, cy - r * .55f, r * .45f, Color.argb(90, 255, 255, 255), Color.TRANSPARENT, Shader.TileMode.CLAMP)
+        canvas.drawCircle(cx - r * .35f, cy - r * .55f, r * .45f, paint)
+        paint.shader = null
+    }
+
+    /** Text on a dark rounded pill, readable over the room. */
+    private fun pill(value: String, y: Float, size: Float) {
+        paint.textSize = size
+        val w = paint.measureText(value) / 2 + 36f
+        paint.color = Color.argb(170, 20, 20, 26)
+        canvas.drawRoundRect(RectF(pixelWidth / 2f - w, y - size - 14f, pixelWidth / 2f + w, y + 18f), 40f, 40f, paint)
+        center(value, y, size)
     }
 
     private fun bubbleWidth(lines: List<String>): Float {

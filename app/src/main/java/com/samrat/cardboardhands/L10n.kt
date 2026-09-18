@@ -129,6 +129,18 @@ object L10n {
         "Клавиатура" to arrayOf("Keyboard", "Teclado", "Teclado"),
         "Отправить" to arrayOf("Send", "Enviar", "Enviar"),
         "Новый разговор" to arrayOf("New chat", "Nova conversa", "Nova conversa"),
+        "Привет" to arrayOf("Hi", "Oi", "Olá"),
+        "Чем помочь?" to arrayOf("How can I help?", "Como posso ajudar?", "Como posso ajudar?"),
+        "Отлично! Готова помочь." to arrayOf("Great! Ready to help.", "Ótima! Pronta para ajudar.", "Ótima! Pronta para ajudar."),
+        "Пожалуйста!" to arrayOf("You're welcome!", "De nada!", "De nada!"),
+        "Я Elix, ассистент PhoneXR." to arrayOf("I'm Elix, the PhoneXR assistant.", "Sou a Elix, a assistente do PhoneXR.", "Sou a Elix, a assistente do PhoneXR."),
+        "Сейчас" to arrayOf("It's", "Agora são", "São"),
+        "Заряд" to arrayOf("Battery", "Bateria", "Bateria"),
+        "Снимаю!" to arrayOf("Taking a photo!", "Tirando foto!", "A tirar fotografia!"),
+        "Готово, выровняла вид." to arrayOf("Done, view recentered.", "Pronto, visão recentralizada.", "Feito, vista recentrada."),
+        "Обойдите край свободного места." to arrayOf("Walk around the edge of the free space.", "Caminhe pela borda do espaço livre.", "Percorra o limite do espaço livre."),
+        "Выхожу из VR." to arrayOf("Leaving VR.", "Saindo do VR.", "A sair de VR."),
+        "Открываю." to arrayOf("Opening.", "Abrindo.", "A abrir."),
     )
 }
 
