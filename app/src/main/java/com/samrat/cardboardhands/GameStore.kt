@@ -18,6 +18,9 @@ import java.net.URLEncoder
  *   vr_games/Game Name/game.apk           a game in its own folder, which may also hold
  *   vr_games/Game Name/icon.png           an icon (icon.png / icon.jpg / icon.webp)
  *   vr_games/Game Name/description.txt    and a description shown in the store
+ *   vr_games/game.json                    a link: the APK lives elsewhere (GitHub Releases), so it
+ *                                         may be larger than Supabase's 50 MB per file. Fields:
+ *                                         {"name", "url", "icon"?, "description"?, "size"?}
  */
 object GameStore {
     const val URL_BASE = "https://fjiostsfwfennbovpolc.supabase.co"
@@ -43,8 +46,13 @@ object GameStore {
         val size: Long,
         val iconPath: String?,
         val descriptionPath: String?,
+        /** For a link entry: where the APK is downloaded from, its icon and description. */
+        val url: String? = null,
+        val iconUrl: String? = null,
+        val descriptionText: String? = null,
     ) {
-        val extension get() = path.substringAfterLast('.', "apk").lowercase()
+        val extension get() = (url?.substringBefore('?') ?: path).substringAfterLast('.', "apk").lowercase()
+            .takeIf { it in setOf("apk", "pxr") } ?: "apk"
     }
 
     class StoreException(message: String) : Exception(message)
@@ -63,7 +71,14 @@ object GameStore {
                 // A folder: one game with its files.
                 val folder = location.prefix + name + "/"
                 val files = listFolder(location.bucket, folder)
-                val game = files.firstOrNull { it.fileExtension() in installable } ?: continue
+                val game = files.firstOrNull { it.fileExtension() in installable }
+                if (game == null) {
+                    // A folder with a link file instead of the APK itself.
+                    files.firstOrNull { it.fileExtension() == "json" }
+                        ?.let { link(location.bucket, folder + it.getString("name"), name) }
+                        ?.let { items += it }
+                    continue
+                }
                 val names = files.map { it.getString("name") }
                 items += Item(
                     title = name,
@@ -82,10 +97,29 @@ object GameStore {
                     iconPath = null,
                     descriptionPath = null
                 )
+            } else if (entry.fileExtension() == "json" && name != "pwa.json") {
+                link(location.bucket, location.prefix + name, name.substringBeforeLast('.'))?.let { items += it }
             }
         }
         return items.sortedBy { it.title.lowercase() }
     }
+
+    /** Reads a link file; broken ones are skipped so one typo does not empty the store. */
+    private fun link(bucket: String, path: String, fallbackTitle: String): Item? = runCatching {
+        val json = JSONObject(open(bucket, path).use { it.inputStream.readBytes().toString(Charsets.UTF_8) })
+        val url = json.getString("url").takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: return null
+        Item(
+            title = json.optString("name").ifBlank { fallbackTitle },
+            path = path,
+            bucket = bucket,
+            size = json.optLong("size", -1L),
+            iconPath = null,
+            descriptionPath = null,
+            url = url,
+            iconUrl = json.optString("icon").takeIf { it.startsWith("http") },
+            descriptionText = json.optString("description").takeIf { it.isNotBlank() },
+        )
+    }.getOrNull()
 
     /** Network call: a text file from the store folder, such as pwa.json. */
     fun readText(name: String): String {
@@ -93,12 +127,17 @@ object GameStore {
         return open(location.bucket, location.prefix + name).use { it.inputStream.readBytes().toString(Charsets.UTF_8) }
     }
 
-    fun description(item: Item): String? = item.descriptionPath?.let { path ->
+    fun description(item: Item): String? = item.descriptionText ?: item.descriptionPath?.let { path ->
         runCatching { open(item.bucket, path).use { it.inputStream.readBytes().toString(Charsets.UTF_8).trim() } }.getOrNull()
     }
 
-    fun icon(item: Item): Bitmap? = item.iconPath?.let { path ->
-        runCatching { open(item.bucket, path).use { BitmapFactory.decodeStream(it.inputStream) } }.getOrNull()
+    fun icon(item: Item): Bitmap? {
+        item.iconUrl?.let { url ->
+            return runCatching { openUrl(url).use { BitmapFactory.decodeStream(it.inputStream) } }.getOrNull()
+        }
+        return item.iconPath?.let { path ->
+            runCatching { open(item.bucket, path).use { BitmapFactory.decodeStream(it.inputStream) } }.getOrNull()
+        }
     }
 
     /** Downloads [item] into [directory], reporting progress 0..1 (or -1 when the size is unknown). */
@@ -106,7 +145,8 @@ object GameStore {
         directory.mkdirs()
         directory.listFiles()?.forEach { it.delete() }
         val target = File(directory, item.title.replace(Regex("[^\\p{L}\\p{N}._ -]"), "_") + "." + item.extension)
-        open(item.bucket, item.path).use { response ->
+        val source = item.url?.let { openUrl(it) } ?: open(item.bucket, item.path)
+        source.use { response ->
             val total = response.connection.contentLengthLong.takeIf { it > 0 } ?: item.size
             response.inputStream.use { input ->
                 target.outputStream().use { output ->
@@ -183,6 +223,29 @@ object GameStore {
             connection.disconnect()
         }
         throw FileNotFoundException("Файл «$path» не скачивается из Supabase")
+    }
+
+    /** A file outside Supabase, e.g. a GitHub release asset (which redirects to its CDN). */
+    private fun openUrl(address: String): Response {
+        var url = URL(address)
+        repeat(5) {
+            val connection = url.openConnection() as HttpURLConnection
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 60_000
+            connection.instanceFollowRedirects = false
+            val code = connection.responseCode
+            if (code in 300..399) {
+                val next = connection.getHeaderField("Location")
+                connection.disconnect()
+                url = URL(url, next ?: throw FileNotFoundException("Пустая переадресация: $address"))
+            } else if (code == 200) {
+                return Response(connection)
+            } else {
+                connection.disconnect()
+                throw FileNotFoundException("Файл по ссылке не скачивается (код $code): $address")
+            }
+        }
+        throw FileNotFoundException("Слишком много переадресаций: $address")
     }
 
     private fun request(method: String, path: String, body: String?): Pair<Int, String> {
