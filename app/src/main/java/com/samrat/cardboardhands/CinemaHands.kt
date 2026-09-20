@@ -101,17 +101,8 @@ class CinemaHands(
                 hand.u = x.coerceIn(0f, 1f)
                 hand.v = y.coerceIn(0f, 1f)
                 // Palm toward the face + pinch: LostXR types "/connect" into Minecraft for the mod.
-                if (pinching && !hand.down && shape.palmToFace && !MinecraftBridge.connected) {
-                    hand.down = true
-                    onConnectGesture()
-                    return@forEachIndexed
-                }
-                if (MinecraftBridge.connected) {
-                    // The mod plays with the hands; no taps on the screen.
-                    if (hand.down) release(hand)
-                    cursors += CinemaRenderer.Cursor(hand.u, hand.v, pinching)
-                    return@forEachIndexed
-                }
+                
+                
                 val onScreen = x in 0f..1f && y in 0f..1f
                 val pressed = pinching && (hand.down || onScreen)
                 cursors += CinemaRenderer.Cursor(hand.u, hand.v, pressed)

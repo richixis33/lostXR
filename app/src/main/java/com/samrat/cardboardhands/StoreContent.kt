@@ -129,7 +129,7 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
         }
         val modCards = mods.map { item ->
             Card(item.title, item.path.substringAfterLast('.').uppercase() + if (item.size > 0) " · " + Updates.formatSize(item.size) else "",
-                { appIcon(MinecraftMods.MINECRAFT) }, { progress[item.path]?.let { "$it%" } ?: tr("Установить") }) {
+                { appIcon("") }, { progress[item.path]?.let { "$it%" } ?: tr("Установить") }) {
                 if (progress.containsKey(item.path)) return@Card
                 progress[item.path] = 0
                 draw()
@@ -141,7 +141,7 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
                     }
                 }.getOrNull()
                 progress.remove(item.path)
-                val problem = if (file != null && activity != null) MinecraftMods.install(activity, file) else "«${item.title}» не скачался"
+                val problem = if (file != null && activity != null) null else "«${item.title}» не скачался"
                 if (problem != null) host.message(problem) else host.message(tr("Мод открыт в Minecraft: подтвердите импорт"))
             }
         }
@@ -156,7 +156,7 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
             Section(tr("VR‑режимы"), modes),
             Section(tr("Приложения LostXR"), apps),
             Section(if (loading) "Игры · загрузка…" else tr("Игры"), gameCards).takeIf { loading || gameCards.isNotEmpty() },
-            Section(tr("Моды Minecraft"), modCards).takeIf { modCards.isNotEmpty() },
+            
             Section(tr("Веб‑приложения"), webCards).takeIf { webCards.isNotEmpty() },
         )
     }

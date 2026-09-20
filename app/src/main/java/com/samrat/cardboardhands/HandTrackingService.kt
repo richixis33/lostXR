@@ -1,4 +1,5 @@
 package com.samrat.cardboardhands
+import com.google.mediapipe.tasks.core.Delegate
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -38,8 +39,8 @@ class HandTrackingService : LifecycleService() {
     private var tracker: HandTracker? = null
     private var lastFrameMs = 0L
     private val socket = DatagramSocket()
-    private val stableLeft = StableHand(.34f)
-    private val stableRight = StableHand(.66f)
+    private val stableLeft = StableHand(.34f) { TrackingSettings.getMinCutoff(this) to TrackingSettings.getBeta(this) }
+    private val stableRight = StableHand(.66f) { TrackingSettings.getMinCutoff(this) to TrackingSettings.getBeta(this) }
     private val pinchLatches = arrayOf(HandGestures.PinchLatch(), HandGestures.PinchLatch())
     private var joyCons: JoyConTracker? = null
     private val vision = JoyConVision()
@@ -252,6 +253,15 @@ class HandTrackingService : LifecycleService() {
         var rightJoy = joyCons?.pose(false) ?: JoyConTracker.Pose()
         var left = stableLeft.snapshot(leftJoy.connected)
         var right = stableRight.snapshot(rightJoy.connected)
+        val mode = TrackingSettings.getHandRenderMode(this)
+        if (mode == TrackingSettings.HANDS_DISABLED) {
+            left = left.copy(visible = false)
+            right = right.copy(visible = false)
+        } else if (mode == TrackingSettings.HANDS_RIGHT_ONLY) {
+            left = left.copy(visible = false)
+        } else if (mode == TrackingSettings.HANDS_LEFT_ONLY) {
+            right = right.copy(visible = false)
+        }
         if (current.markerJoyCons) {
             left = markerHand(0, leftJoy.connected)
             right = markerHand(1, rightJoy.connected)
@@ -349,73 +359,32 @@ class HandTrackingService : LifecycleService() {
     )
 
     /** Removes landmark jitter and keeps a detected click alive long enough for games to read it. */
-    private class StableHand(private val restingX: Float = .5f) {
-        private var x = restingX
-        private var y = .5f
-        private var z = .5f
-        // One Euro filters: calm while the hand holds still, responsive when it moves.
-        private val fx = HandGestures.OneEuro(minCutoff = .6f, beta = 1.4f, deadZone = .002f)
-        private val fy = HandGestures.OneEuro(minCutoff = .6f, beta = 1.4f, deadZone = .002f)
-        private val fz = HandGestures.OneEuro(minCutoff = .3f, beta = .6f, deadZone = .004f)
-        private var pinchUntilMs = 0L
-        private var palmToFace = false
-        private var lastSeenMs = 0L
-        private var fistUntilMs = 0L
-        private var indexUntilMs = 0L
-        private var thumbUntilMs = 0L
+    private class StableHand(
+    private val defaultX: Float,
+    private val getParams: () -> Pair<Float, Float> = { 1.0f to 0.007f }
+) {
+    private val filter = OneEuroFilter3D()
+    private var last = HandState(false, x = defaultX, y = .5f, z = .5f)
+    private var unseen = 0
 
-        @Synchronized
-        fun update(raw: HandState) {
-            val now = android.os.SystemClock.elapsedRealtime()
-            if (raw.present) {
-                val first = lastSeenMs == 0L || now - lastSeenMs > 300L
-                if (first) { fx.reset(); fy.reset(); fz.reset() }
-                val ns = now * 1_000_000L
-                x = fx.filter(raw.x, ns)
-                y = fy.filter(raw.y, ns)
-                z = fz.filter(raw.z, ns)
-                lastSeenMs = now
-                if (raw.pinch) pinchUntilMs = now + 90L
-                palmToFace = raw.palmToFace
-                if (raw.fist) {
-                    fistUntilMs = now + 110L
-                    indexUntilMs = 0L
-                    thumbUntilMs = 0L
-                } else {
-                    // An observed open/pointing hand releases a stale false fist immediately.
-                    fistUntilMs = 0L
-                    if (raw.index) indexUntilMs = now + 150L
-                    if (raw.thumb) thumbUntilMs = now + 150L
-                }
+    fun update(detected: HandState) {
+        val (minCutoff, beta) = getParams()
+        filter.updateParams(minCutoff.toDouble(), beta.toDouble())
+
+        if (detected.visible) {
+            unseen = 0
+            val (sx, sy, sz) = filter.filter(detected.x, detected.y, detected.z)
+            last = detected.copy(x = sx, y = sy, z = sz)
+        } else {
+            unseen++
+            // Если рука пропала из кадра больше чем на 4 кадра — сбрасываем фильтр,
+            // чтобы при следующем появлении не было эффекта "тянущейся" через экран руки
+            if (unseen > 4) {
+                filter.reset()
+                last = last.copy(visible = false)
             }
         }
-
-        @Synchronized
-        fun snapshot(controllerConnected: Boolean): HandState {
-            val now = android.os.SystemClock.elapsedRealtime()
-            val handPresent = now - lastSeenMs < 420L
-            return HandState(
-                present = handPresent || controllerConnected,
-                fist = handPresent && now < fistUntilMs,
-                index = handPresent && now < indexUntilMs,
-                thumb = handPresent && now < thumbUntilMs,
-                x = x,
-                y = y,
-                z = z,
-                pinch = handPresent && now < pinchUntilMs,
-                palmToFace = handPresent && palmToFace
-            )
-        }
     }
 
-    private val Boolean.i get() = if (this) 1 else 0
-
-    companion object {
-        private const val CHANNEL = "phonexr_hands"
-        private const val NOTIFICATION_ID = 42
-        private const val RUNTIME_PORT = 42424
-        private const val SDK_PORT = 42425
-        /** A Joy-Con not seen for this long no longer counts as tracked. */
-        private const val LOST_MS = 400L
-    }
+    fun snapshot(connected: Boolean): HandState = last.copy(visible = last.visible || connected)
 }

@@ -166,5 +166,6 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/patched_apk_paths" />
         </provider>
+        <activity android:name=".TrackingSettingsActivity" android:exported="false" />
     </application>
 </manifest>

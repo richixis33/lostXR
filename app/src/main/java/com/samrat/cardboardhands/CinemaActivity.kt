@@ -121,22 +121,10 @@ class CinemaActivity : Activity(), LifecycleOwner {
         hands?.screenHeight = renderer.screenH
         hands?.onViewHands = { renderer.viewHands = it }
         if (minecraft) {
-            MinecraftBridge.start()
+            // MinecraftBridge removed
             hands?.onConnectGesture = { typeConnect() }
         }
-        if (minecraft) thread(name = "LostXR Minecraft look") {
-            val head = FloatArray(16)
-            var lastYaw = Float.NaN
-            var lastPitch = 0f
-            var bridgeTick = 0
-            while (running) {
-                tracker.copyHead(head)
-                val yaw = Math.toDegrees(kotlin.math.atan2(head[8], head[10]).toDouble()).toFloat()
-                val pitch = Math.toDegrees(kotlin.math.asin((-head[9]).coerceIn(-1f, 1f).toDouble())).toFloat()
-                // With the mod linked, the head and hands go to it; otherwise the touch controls drive the camera.
-                if (MinecraftBridge.connected) {
-                    if (++bridgeTick % 3 == 0) hands?.let { MinecraftBridge.sendPose(yaw, pitch, it.bridgeHands) }
-                }
+        }
                 hands?.cameraToView = (4f / 3f) / renderer.eyeAspect
                 lastYaw = yaw
                 lastPitch = pitch
@@ -207,7 +195,7 @@ class CinemaActivity : Activity(), LifecycleOwner {
 
     override fun onDestroy() {
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
-        MinecraftBridge.stop()
+        // MinecraftBridge removed
         cameraExecutor.shutdownNow()
         trackingExecutor.execute { handTracker?.close() }
         trackingExecutor.shutdown()
@@ -276,7 +264,7 @@ class CinemaActivity : Activity(), LifecycleOwner {
     private fun typeConnect() {
         val id = displayId
         val shell = service ?: return
-        if (id < 0 || MinecraftBridge.connected) return
+        if (id < 0) return
         thread {
             val map = android.view.KeyCharacterMap.load(android.view.KeyCharacterMap.VIRTUAL_KEYBOARD)
             fun press(code: Int) {
@@ -286,8 +274,7 @@ class CinemaActivity : Activity(), LifecycleOwner {
             }
             press(KeyEvent.KEYCODE_SLASH)
             Thread.sleep(600)
-            map.getEvents(MinecraftBridge.CONNECT.removePrefix("/").toCharArray())?.forEach { event ->
-                runCatching { shell.injectKey(event, id) }
+            // connect command removed
                 Thread.sleep(8)
             }
             Thread.sleep(150)
