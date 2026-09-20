@@ -359,9 +359,107 @@ class HandTrackingService : LifecycleService() {
     )
 
     /** Removes landmark jitter and keeps a detected click alive long enough for games to read it. */
+        private class OneEuroFilter(
+        private var minCutoff: Double = 1.0,
+        private var beta: Double = 0.007,
+        private var dCutoff: Double = 1.0
+    ) {
+        private var xPrev: Double? = null
+        private var dxPrev: Double = 0.0
+        private var tPrev: Long? = null
+
+        private fun alpha(cutoff: Double, dt: Double): Double {
+            val tau = 1.0 / (2.0 * Math.PI * cutoff)
+            return 1.0 / (1.0 + tau / dt)
+        }
+
+        fun filter(x: Double, timestampMs: Long = System.currentTimeMillis()): Double {
+            if (xPrev == null || tPrev == null) {
+                xPrev = x
+                tPrev = timestampMs
+                dxPrev = 0.0
+                return x
+            }
+            val dt = (timestampMs - tPrev!!).coerceAtLeast(1) / 1000.0
+            tPrev = timestampMs
+            val dx = (x - xPrev!!) / dt
+            val edx = alpha(dCutoff, dt) * dx + (1.0 - alpha(dCutoff, dt)) * dxPrev
+            dxPrev = edx
+            val cutoff = minCutoff + beta * Math.abs(edx)
+            val filteredX = alpha(cutoff, dt) * x + (1.0 - alpha(cutoff, dt)) * xPrev!!
+            xPrev = filteredX
+            return filteredX
+        }
+
+        fun reset() {
+            xPrev = null
+            dxPrev = 0.0
+            tPrev = null
+        }
+
+        fun updateParams(minCutoff: Double, beta: Double) {
+            this.minCutoff = minCutoff
+            this.beta = beta
+        }
+    }
+
+    private class OneEuroFilter3D(
+        minCutoff: Double = 1.0,
+        beta: Double = 0.007,
+        dCutoff: Double = 1.0
+    ) {
+        private val fx = OneEuroFilter(minCutoff, beta, dCutoff)
+        private val fy = OneEuroFilter(minCutoff, beta, dCutoff)
+        private val fz = OneEuroFilter(minCutoff, beta, dCutoff)
+
+        fun filter(px: Float, py: Float, pz: Float, timestampMs: Long = System.currentTimeMillis()): Triple<Float, Float, Float> {
+            return Triple(
+                fx.filter(px.toDouble(), timestampMs).toFloat(),
+                fy.filter(py.toDouble(), timestampMs).toFloat(),
+                fz.filter(pz.toDouble(), timestampMs).toFloat()
+            )
+        }
+
+        fun reset() {
+            fx.reset()
+            fy.reset()
+            fz.reset()
+        }
+
+        fun updateParams(minCutoff: Double, beta: Double) {
+            fx.updateParams(minCutoff, beta)
+            fy.updateParams(minCutoff, beta)
+            fz.updateParams(minCutoff, beta)
+        }
+    }
+
     private class StableHand(
         private val defaultX: Float,
         private val getParams: () -> Pair<Float, Float> = { 1.0f to 0.007f }
+    ) {
+        private val euroFilter = OneEuroFilter3D()
+        private var last = HandState(present = false, x = defaultX, y = .5f, z = .5f)
+        private var unseen = 0
+
+        fun update(detected: HandState) {
+            val (minCutoff, beta) = getParams()
+            euroFilter.updateParams(minCutoff.toDouble(), beta.toDouble())
+
+            if (detected.present) {
+                unseen = 0
+                val pos = euroFilter.filter(detected.x, detected.y, detected.z)
+                last = detected.copy(x = pos.first, y = pos.second, z = pos.third)
+            } else {
+                unseen++
+                if (unseen > 4) {
+                    euroFilter.reset()
+                    last = last.copy(present = false)
+                }
+            }
+        }
+
+        fun snapshot(connected: Boolean): HandState = last.copy(present = last.present || connected)
+    }
     ) {
         private val euroFilter = OneEuroFilter3D()
         private var last = HandState(present = false, x = defaultX, y = .5f, z = .5f)
