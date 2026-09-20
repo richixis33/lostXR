@@ -373,8 +373,8 @@ class HandTrackingService : LifecycleService() {
 
             if (detected.present) {
                 unseen = 0
-                val (sx, sy, sz) = euroFilter.filter(detected.x, detected.y, detected.z)
-                last = detected.copy(x = sx, y = sy, z = sz)
+                val pos = euroFilter.filter(detected.x, detected.y, detected.z)
+                last = detected.copy(x = pos.first, y = pos.second, z = pos.third)
             } else {
                 unseen++
                 if (unseen > 4) {
