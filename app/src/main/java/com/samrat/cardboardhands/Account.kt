@@ -6,7 +6,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * PhoneXR accounts on Supabase Auth (e-mail and password). The user name lives in the account's
+ * LostXR accounts on Supabase Auth (e-mail and password). The user name lives in the account's
  * metadata, so no database table is needed; calls use the account id as the address.
  */
 object Account {

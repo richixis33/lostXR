@@ -52,7 +52,7 @@ class UpdateActivity : ComponentActivity() {
         auto = Updates.autoUpdate(this)
         beta = Updates.beta(this)
         check()
-        setContent { PhoneXRTheme { Screen() } }
+        setContent { LostXRTheme { Screen() } }
     }
 
     private fun check() {
@@ -100,7 +100,7 @@ class UpdateActivity : ComponentActivity() {
                 checking -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CupertinoActivityIndicator() }
                 found != null -> UpdateCard(found)
                 else -> Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    CupertinoText("PhoneXR ${Updates.currentVersion(this@UpdateActivity)}", fontWeight = FontWeight.SemiBold)
+                    CupertinoText("LostXR ${Updates.currentVersion(this@UpdateActivity)}", fontWeight = FontWeight.SemiBold)
                     CupertinoText(error ?: tr("Установлена последняя версия"), color = CupertinoTheme.colorScheme.secondaryLabel)
                 }
             }
@@ -123,7 +123,7 @@ class UpdateActivity : ComponentActivity() {
                     }
                 }
                 Column(Modifier.padding(start = 14.dp)) {
-                    CupertinoText("PhoneXR ${found.version}", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    CupertinoText("LostXR ${found.version}", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     CupertinoText(Updates.formatSize(found.size), color = CupertinoTheme.colorScheme.secondaryLabel)
                 }
             }

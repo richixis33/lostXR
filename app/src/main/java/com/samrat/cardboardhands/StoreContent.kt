@@ -18,7 +18,7 @@ import kotlin.concurrent.thread
 
 /**
  * The store in the headset, laid out like the App Store: cards with an icon, a name, a line of
- * description and a pill button — VR modes, PhoneXR apps, games from the server and web apps.
+ * description and a pill button — VR modes, LostXR apps, games from the server and web apps.
  */
 class StoreContent(private val context: Context, private val host: Host) : VrWindow.Content {
     interface Host {
@@ -154,7 +154,7 @@ class StoreContent(private val context: Context, private val host: Host) : VrWin
         }
         sections = listOfNotNull(
             Section(tr("VR‑режимы"), modes),
-            Section(tr("Приложения PhoneXR"), apps),
+            Section(tr("Приложения LostXR"), apps),
             Section(if (loading) "Игры · загрузка…" else tr("Игры"), gameCards).takeIf { loading || gameCards.isNotEmpty() },
             Section(tr("Моды Minecraft"), modCards).takeIf { modCards.isNotEmpty() },
             Section(tr("Веб‑приложения"), webCards).takeIf { webCards.isNotEmpty() },

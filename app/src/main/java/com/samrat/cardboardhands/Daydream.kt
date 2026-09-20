@@ -16,7 +16,7 @@ import java.io.File
 /**
  * Daydream games through Opendream Services (a community build of Google VR Services 1.13, package
  * com.google.vr.vrcore). Games for Daydream look for that package; Cardboard games run without it.
- * The APK ships inside PhoneXR (assets/daydream) and is installed on request.
+ * The APK ships inside LostXR (assets/daydream) and is installed on request.
  */
 object Daydream {
     private const val ASSET = "daydream/opendream-services.apk"
@@ -29,16 +29,16 @@ object Daydream {
     /** Opens the system installer for Opendream Services. */
     fun installServices(activity: Activity) {
         if (!bundled(activity)) {
-            Toast.makeText(activity, "Opendream Services нет в этой сборке PhoneXR", Toast.LENGTH_LONG).show()
+            Toast.makeText(activity, "Opendream Services нет в этой сборке LostXR", Toast.LENGTH_LONG).show()
             return
         }
         installAsset(activity, ASSET, "opendream-services.apk")
     }
 
-    /** Copies an APK shipped in PhoneXR's assets to the shared cache and opens the system installer. */
+    /** Copies an APK shipped in LostXR's assets to the shared cache and opens the system installer. */
     fun installAsset(activity: Activity, asset: String, fileName: String) {
         if (!activity.packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(activity, "Разрешите PhoneXR устанавливать приложения и повторите", Toast.LENGTH_LONG).show()
+            Toast.makeText(activity, "Разрешите LostXR устанавливать приложения и повторите", Toast.LENGTH_LONG).show()
             activity.startActivity(Intent(AndroidSettings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
             return
         }
@@ -51,12 +51,12 @@ object Daydream {
         })
     }
 
-    /** Saves a passthrough frame to Pictures/PhoneXR, where the Photos app finds it. */
+    /** Saves a passthrough frame to Pictures/LostXR, where the Photos app finds it. */
     fun savePhoto(context: Context, bitmap: Bitmap): Uri {
         val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "PhoneXR_${System.currentTimeMillis()}.jpg")
+            put(MediaStore.Images.Media.DISPLAY_NAME, "LostXR_${System.currentTimeMillis()}.jpg")
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/PhoneXR")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/LostXR")
         }
         val resolver = context.contentResolver
         val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("MediaStore insert failed")

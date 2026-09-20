@@ -18,7 +18,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
 /**
- * Persona calls between PhoneXR accounts. Everyone signed in is "online" in a lobby (Supabase
+ * Persona calls between LostXR accounts. Everyone signed in is "online" in a lobby (Supabase
  * Realtime presence). A call is a private channel where both sides send, 20 times a second, their
  * voice (IMA ADPCM), how their mouth moves and where their hands are; the Personas themselves are
  * exchanged once at the start. No video leaves the headset — only the Persona is shown.

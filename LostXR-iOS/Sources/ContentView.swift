@@ -21,7 +21,7 @@ struct ContentView: View {
                         Label("Проверить трекинг рук", systemImage: "hand.raised")
                     }
                 } header: {
-                    Text("PhoneXR для iPhone")
+                    Text("LostXR для iPhone")
                 } footer: {
                     Text("APK сохраняется на iPhone и анализируется. Android-код не запускается как iOS-код: для игры потребуется порт из исходников.")
                 }
@@ -46,7 +46,7 @@ struct ContentView: View {
 
                 Section { Text(library.message).foregroundStyle(.secondary) }
             }
-            .navigationTitle("PhoneXR")
+            .navigationTitle("LostXR")
             .fileImporter(isPresented: $importing, allowedContentTypes: packageTypes) { result in
                 if case let .success(url) = result { library.importPackage(url) }
                 if case let .failure(error) = result { library.message = error.localizedDescription }
@@ -72,7 +72,7 @@ private struct GameDetails: View {
                 Button("Запустить") { }
                     .disabled(!game.report.canLaunchNatively)
             } footer: {
-                Text(game.report.canLaunchNatively ? "Нативный пакет PhoneXR готов." : "Этот APK содержит Android-бинарники. Нужна пересборка игры под iOS/Metal.")
+                Text(game.report.canLaunchNatively ? "Нативный пакет LostXR готов." : "Этот APK содержит Android-бинарники. Нужна пересборка игры под iOS/Metal.")
             }
         }
         .navigationTitle(game.report.title)

@@ -35,7 +35,7 @@ import zone.ien.hig.CupertinoText
 import zone.ien.hig.theme.CupertinoTheme
 import kotlin.concurrent.thread
 
-/** PhoneXR account (Supabase): sign in, create an account, sign out. Calls need it. */
+/** LostXR account (Supabase): sign in, create an account, sign out. Calls need it. */
 class AccountActivity : ComponentActivity() {
     private var user by mutableStateOf<Account.User?>(null)
     private var creating by mutableStateOf(false)
@@ -49,7 +49,7 @@ class AccountActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         user = Account.current(this)
         name = Settings.userName(this)
-        setContent { PhoneXRTheme { Screen() } }
+        setContent { LostXRTheme { Screen() } }
     }
 
     private fun submit() {
@@ -87,7 +87,7 @@ class AccountActivity : ComponentActivity() {
             }
             Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 CupertinoText(
-                    if (creating) "Создайте аккаунт PhoneXR" else "Войдите в аккаунт PhoneXR",
+                    if (creating) "Создайте аккаунт LostXR" else "Войдите в аккаунт LostXR",
                     fontSize = 22.sp, fontWeight = FontWeight.SemiBold
                 )
                 if (creating) Field("Имя", name, false) { name = it }

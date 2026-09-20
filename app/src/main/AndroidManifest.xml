@@ -65,7 +65,7 @@
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:label="PhoneXR"
+        android:label="LostXR"
         android:supportsRtl="true"
         android:theme="@style/Theme.CardboardHands"
         android:usesCleartextTraffic="true">
@@ -137,7 +137,7 @@
             android:exported="true"
             android:noHistory="true"
             android:permission="com.samrat.cardboardhands.permission.START_HAND_TRACKING"
-            android:theme="@style/Theme.PhoneXR.Transparent" />
+            android:theme="@style/Theme.LostXR.Transparent" />
         <service
             android:name=".HandTrackingService"
             android:exported="false"

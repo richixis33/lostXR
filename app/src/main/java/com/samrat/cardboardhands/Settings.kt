@@ -47,7 +47,7 @@ object Settings {
         KeyEvent.KEYCODE_BUTTON_MODE to Action.SYSTEM,
     )
 
-    /** Every Joy-Con key PhoneXR knows about, in the order used by the live diagram. */
+    /** Every Joy-Con key LostXR knows about, in the order used by the live diagram. */
     val KNOWN_KEYS: List<Int> = listOf(
         KeyEvent.KEYCODE_BUTTON_L2, KeyEvent.KEYCODE_BUTTON_R2,
         KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1,

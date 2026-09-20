@@ -15,16 +15,16 @@ import java.util.UUID
 import kotlin.concurrent.thread
 
 /**
- * The link to the PhoneXR VR mod inside Minecraft Bedrock. Minecraft connects to this tiny
+ * The link to the LostXR VR mod inside Minecraft Bedrock. Minecraft connects to this tiny
  * WebSocket server with "/connect localhost:19144" (Bedrock's own feature for companion apps);
- * PhoneXR then sends the head and hands as "/scriptevent phonexr:pose …", which the mod's script
+ * LostXR then sends the head and hands as "/scriptevent phonexr:pose …", which the mod's script
  * turns into the view, hands in the world, breaking, placing and walking.
  */
 object MinecraftBridge {
     const val PORT = 19144
     const val CONNECT = "/connect localhost:$PORT"
-    private const val TAG = "PhoneXR-MCBridge"
-    private const val ASSET = "minecraft/PhoneXR-VR.mcaddon"
+    private const val TAG = "LostXR-MCBridge"
+    private const val ASSET = "minecraft/LostXR-VR.mcaddon"
     private const val PREFS = "minecraft_mod"
 
     @Volatile var connected = false
@@ -39,7 +39,7 @@ object MinecraftBridge {
         val socket = runCatching { ServerSocket(PORT, 1, InetAddress.getByName("127.0.0.1")) }
             .onFailure { Log.w(TAG, "Port busy", it) }.getOrNull() ?: return
         server = socket
-        thread(name = "PhoneXR Minecraft bridge") {
+        thread(name = "LostXR Minecraft bridge") {
             while (!socket.isClosed) {
                 val peer = runCatching { socket.accept() }.getOrNull() ?: break
                 runCatching { serve(peer) }.onFailure { Log.w(TAG, "Minecraft link ended", it) }
@@ -128,7 +128,7 @@ object MinecraftBridge {
 
     /** Hands the bundled mod to Minecraft, which imports it. Returns an error text or null. */
     fun installMod(activity: android.app.Activity): String? {
-        val file = File(MinecraftMods.folder(activity), "PhoneXR-VR.mcaddon")
+        val file = File(MinecraftMods.folder(activity), "LostXR-VR.mcaddon")
         activity.assets.open(ASSET).use { input -> file.outputStream().use { input.copyTo(it) } }
         val problem = MinecraftMods.install(activity, file)
         if (problem == null) activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("installed", true).apply()

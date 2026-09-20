@@ -28,7 +28,7 @@ import zone.ien.hig.theme.CupertinoTheme
 class AboutActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { PhoneXRTheme { About() } }
+        setContent { LostXRTheme { About() } }
     }
 
     @Composable
@@ -42,7 +42,7 @@ class AboutActivity : ComponentActivity() {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 AppIcon()
-                CupertinoText("PhoneXR", style = CupertinoTheme.typography.title1)
+                CupertinoText("LostXR", style = CupertinoTheme.typography.title1)
                 CupertinoText(
                     "Версия ${BuildConfig.VERSION_NAME}",
                     color = CupertinoTheme.colorScheme.secondaryLabel

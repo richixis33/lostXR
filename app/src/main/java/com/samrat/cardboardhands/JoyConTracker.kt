@@ -34,7 +34,7 @@ class JoyConTracker(context: Context) : AutoCloseable, InputManager.InputDeviceL
     )
 
     private val inputManager = context.getSystemService(InputManager::class.java)
-    private val thread = HandlerThread("PhoneXR Joy-Con").apply { start() }
+    private val thread = HandlerThread("LostXR Joy-Con").apply { start() }
     private val handler = Handler(thread.looper)
     private val slots = arrayOf(Slot(), Slot())
 

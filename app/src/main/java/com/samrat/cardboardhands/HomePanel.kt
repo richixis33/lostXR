@@ -14,7 +14,7 @@ import android.text.TextUtils
 
 /**
  * visionOS-style home: round app icons floating in the room, a few rows per page with page dots.
- * [Mode.STORE] shows web apps from the PhoneXR store, [Mode.MENU] the system menu.
+ * [Mode.STORE] shows web apps from the LostXR store, [Mode.MENU] the system menu.
  * Everything is drawn into one transparent bitmap that the VR scene places in front of the user.
  */
 class HomePanel {

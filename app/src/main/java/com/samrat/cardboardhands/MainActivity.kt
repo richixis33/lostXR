@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
     private fun FriendsTab() {
         HigPage(title = tr("Друзья"), subtitle = tr("Добавляйте друзей по юзернейму и звоните им персоной в VR"), bottomInset = TAB_BAR_ROOM) {
             if (Account.current(this@MainActivity) == null) {
-                HigSection(footer = tr("Друзья и звонки работают с аккаунтом PhoneXR.")) {
+                HigSection(footer = tr("Друзья и звонки работают с аккаунтом LostXR.")) {
                     HigLink(tr("Войти")) { start(AccountActivity::class.java) }
                 }
                 return@HigPage
@@ -246,7 +246,7 @@ class MainActivity : ComponentActivity() {
         tab = savedInstanceState?.getInt(KEY_TAB) ?: 0
         L10n.init(this)
         rikka.shizuku.Shizuku.addRequestPermissionResultListener(shizukuListener)
-        setContent { PhoneXRTheme { Root() } }
+        setContent { LostXRTheme { Root() } }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -319,7 +319,7 @@ class MainActivity : ComponentActivity() {
             CupertinoAlertDialog(
                 onDismissRequest = { languagePicker = false },
                 title = { CupertinoText(tr("Язык")) },
-                message = { CupertinoText("PhoneXR") }
+                message = { CupertinoText("LostXR") }
             ) {
                 L10n.Lang.values().forEach { lang ->
                     default(onClick = {
@@ -334,7 +334,7 @@ class MainActivity : ComponentActivity() {
         update?.let { found ->
             CupertinoAlertDialog(
                 onDismissRequest = { update = null },
-                title = { CupertinoText("Доступно PhoneXR ${found.version}") },
+                title = { CupertinoText("Доступно LostXR ${found.version}") },
                 message = { CupertinoText(Updates.formatSize(found.size)) }
             ) {
                 cancel(onClick = { update = null }) { CupertinoText(tr("Позже")) }
@@ -375,7 +375,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun MenuTab() {
         HigPage(
-            title = "PhoneXR",
+            title = "LostXR",
             subtitle = "VR на телефоне: руки в камере, Joy‑Con вместо контроллеров",
             bottomInset = TAB_BAR_ROOM
         ) {
@@ -391,7 +391,7 @@ class MainActivity : ComponentActivity() {
             HigSection(
                 title = tr("Игры"),
                 footer = "Нажмите на игру, чтобы включить трекинг и запустить её. " +
-                    "Игры Gear VR сначала нужно пропатчить: PhoneXR подменит в них VrApi на OpenXR."
+                    "Игры Gear VR сначала нужно пропатчить: LostXR подменит в них VrApi на OpenXR."
             ) {
                 val list = games
                 when {
@@ -404,7 +404,7 @@ class MainActivity : ComponentActivity() {
             HigSection(
                 title = tr("Установка"),
                 footer = "APK OpenXR-игры, игры Gear VR (64 и 32 бита) или пакет .pxr. " +
-                    "PhoneXR подготовит сборку, подпишет её и откроет установку."
+                    "LostXR подготовит сборку, подпишет её и откроет установку."
             ) {
                 HigLink(busy ?: tr("Установить игру из файла"), enabled = busy == null) {
                     chooseApk.launch(
@@ -418,7 +418,7 @@ class MainActivity : ComponentActivity() {
 
             HigSection(
                 title = "Daydream",
-                footer = "Игры Daydream ищут Google VR Services. PhoneXR ставит Opendream Services 1.13 — " +
+                footer = "Игры Daydream ищут Google VR Services. LostXR ставит Opendream Services 1.13 — " +
                     "после этого игры Daydream и Cardboard появляются в списке игр и в VR‑доме."
             ) {
                 if (Daydream.servicesInstalled(this@MainActivity)) {
@@ -437,22 +437,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** PhoneXR Runtime for OpenXR games: install or update it, then pick it in the OpenXR broker. */
+    /** LostXR Runtime for OpenXR games: install or update it, then pick it in the OpenXR broker. */
     @Composable
     private fun RuntimeSection() {
         val state = if (resumes >= 0) PhoneXrRuntime.state(this) else PhoneXrRuntime.State.MISSING
         HigSection(
             title = "OpenXR",
-            footer = "PhoneXR Runtime заменяет Monado: OpenXR‑игры получают руки, Joy‑Con и голову от PhoneXR. " +
-                "После установки выберите «PhoneXR Runtime» в OpenXR Runtime Broker."
+            footer = "LostXR Runtime заменяет Monado: OpenXR‑игры получают руки, Joy‑Con и голову от LostXR. " +
+                "После установки выберите «LostXR Runtime» в OpenXR Runtime Broker."
         ) {
             when (state) {
-                PhoneXrRuntime.State.READY -> HigRow("PhoneXR Runtime", "Установлен")
-                PhoneXrRuntime.State.OUTDATED -> HigLink("Обновить PhoneXR Runtime") { PhoneXrRuntime.install(this@MainActivity) }
+                PhoneXrRuntime.State.READY -> HigRow("LostXR Runtime", "Установлен")
+                PhoneXrRuntime.State.OUTDATED -> HigLink("Обновить LostXR Runtime") { PhoneXrRuntime.install(this@MainActivity) }
                 PhoneXrRuntime.State.MISSING -> if (PhoneXrRuntime.bundled(this@MainActivity)) {
-                    HigLink("Установить PhoneXR Runtime") { PhoneXrRuntime.install(this@MainActivity) }
+                    HigLink("Установить LostXR Runtime") { PhoneXrRuntime.install(this@MainActivity) }
                 } else {
-                    HigRow("PhoneXR Runtime", "Не входит в эту сборку")
+                    HigRow("LostXR Runtime", "Не входит в эту сборку")
                 }
             }
             HigLink(
@@ -508,7 +508,7 @@ class MainActivity : ComponentActivity() {
     private fun StoreTab() {
         HigPage(
             title = tr("Магазин"),
-            subtitle = "VR-игры с сервера PhoneXR: скачиваются и ставятся как есть.",
+            subtitle = "VR-игры с сервера LostXR: скачиваются и ставятся как есть.",
             bottomInset = TAB_BAR_ROOM
         ) {
             HigSection(
@@ -519,7 +519,7 @@ class MainActivity : ComponentActivity() {
                 VR_MODES.forEach { mode -> VrModeRow(mode) }
             }
             HigSection(
-                title = tr("Приложения PhoneXR"),
+                title = tr("Приложения LostXR"),
                 footer = "Android‑приложения: любые приложения телефона окнами в VR (нужен Shizuku). Появляется на главном экране VR."
             ) {
                 val added = resumes >= 0 && androidApps
@@ -533,7 +533,7 @@ class MainActivity : ComponentActivity() {
                 footer = tr("Дополнения, наборы ресурсов и миры для Minecraft Bedrock (.mcaddon, .mcpack, .mcworld). " +
                     "Minecraft сам импортирует мод, потом включите его в настройках мира.")
             ) {
-                HigLink("PhoneXR VR — VR для Minecraft", value = if (resumes >= 0 && MinecraftBridge.modInstalled(this@MainActivity)) "✓" else tr("Установить")) {
+                HigLink("LostXR VR — VR для Minecraft", value = if (resumes >= 0 && MinecraftBridge.modInstalled(this@MainActivity)) "✓" else tr("Установить")) {
                     MinecraftBridge.installMod(this@MainActivity)?.let { error = it }
                 }
                 HigLink(tr("Установить мод из файла")) { chooseMod.launch(arrayOf("*/*")) }
@@ -560,13 +560,13 @@ class MainActivity : ComponentActivity() {
             if (webApps.isNotEmpty()) {
                 HigSection(
                     title = tr("Веб‑приложения"),
-                    footer = "Открываются в браузере PhoneXR прямо в VR. Добавленные появляются на главном экране VR."
+                    footer = "Открываются в браузере LostXR прямо в VR. Добавленные появляются на главном экране VR."
                 ) {
                     webApps.forEach { app ->
                         val added = app.url in installedWeb
                         HigLink(app.name, value = if (added) tr("Открыть") else tr("Добавить")) {
                             if (added) {
-                                if (!WebApps.open(this@MainActivity, app.url)) error = "Установите браузер PhoneXR"
+                                if (!WebApps.open(this@MainActivity, app.url)) error = "Установите браузер LostXR"
                             } else {
                                 WebApps.add(this@MainActivity, app)
                                 installedWeb = installedWeb + app.url
@@ -608,7 +608,7 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    /** How to switch a VR mode on: the game from Google Play, Shizuku, then play from PhoneXR. */
+    /** How to switch a VR mode on: the game from Google Play, Shizuku, then play from LostXR. */
     @OptIn(ExperimentalCupertinoApi::class)
     @Composable
     private fun GuideDialog(mode: VrMode) {
@@ -621,12 +621,12 @@ class MainActivity : ComponentActivity() {
                 CupertinoText(
                     listOf(
                         (if (installed) "✓ " else "1. ") + "Установите ${mode.game} из Google Play.",
-                        (if (ready) "✓ " else "2. ") + "Установите и запустите Shizuku (через отладку по Wi‑Fi), разрешите доступ PhoneXR.",
+                        (if (ready) "✓ " else "2. ") + "Установите и запустите Shizuku (через отладку по Wi‑Fi), разрешите доступ LostXR.",
                         "3. Нажмите «Играть»: игра откроется на большом экране — ${mode.scene}.",
                         if (mode.packageName == MINECRAFT)
-                            "4. Мод PhoneXR VR ставится в Minecraft сам при первом «Играть». В Minecraft: Настройки → Общие → " +
-                                "выключите «Требовать зашифрованные веб‑сокеты»; в мире включите читы и набор параметров поведения «PhoneXR VR». " +
-                                "В мире покажите ладонь к лицу и сведите пальцы — PhoneXR подключит мод. Дальше: голова — взгляд на 360°, " +
+                            "4. Мод LostXR VR ставится в Minecraft сам при первом «Играть». В Minecraft: Настройки → Общие → " +
+                                "выключите «Требовать зашифрованные веб‑сокеты»; в мире включите читы и набор параметров поведения «LostXR VR». " +
+                                "В мире покажите ладонь к лицу и сведите пальцы — LostXR подключит мод. Дальше: голова — взгляд на 360°, " +
                                 "руки видны в мире, кулак — ломать и бить, щипок — поставить блок, «пистолет» из пальцев — идти."
                         else "4. Управление: щипок любой руки — нажатие по экрану, две руки — два пальца. " +
                             "Joy‑Con и геймпад работают как в самой игре. Тап по телефону выравнивает вид.",
@@ -730,7 +730,7 @@ class MainActivity : ComponentActivity() {
                     GameStore.icon(item)?.let { bitmap -> runOnUiThread { storeIcons[item.path] = bitmap } }
                 }
             } catch (failure: Throwable) {
-                android.util.Log.e("PhoneXR-Store", "Store listing failed", failure)
+                android.util.Log.e("LostXR-Store", "Store listing failed", failure)
                 runOnUiThread {
                     storeLoading = false
                     storeError = failure.localizedMessage ?: "Магазин недоступен"
@@ -753,7 +753,7 @@ class MainActivity : ComponentActivity() {
                     else installApk(file)
                 }
             } catch (failure: Throwable) {
-                android.util.Log.e("PhoneXR-Store", "Download failed: ${item.path}", failure)
+                android.util.Log.e("LostXR-Store", "Download failed: ${item.path}", failure)
                 runOnUiThread {
                     downloads.remove(item.path)
                     error = "«${item.title}» не скачалась: ${failure.localizedMessage}"
@@ -780,7 +780,7 @@ class MainActivity : ComponentActivity() {
             HigSection(title = tr("Проверка")) {
                 HigLink(tr("Проверить гироскоп Joy‑Con")) { start(GyroTestActivity::class.java) }
             }
-            HigSection(title = tr("Магазин"), footer = "Игры берутся из папки «${GameStore.FOLDER}» в Supabase и из файлов .json в корне репозитория PhoneXR на GitHub.") {
+            HigSection(title = tr("Магазин"), footer = "Игры берутся из папки «${GameStore.FOLDER}» в Supabase и из файлов .json в корне репозитория LostXR на GitHub.") {
                 HigRow(tr("Сервер"), GameStore.URL_BASE.removePrefix("https://"))
             }
             HigSection {
@@ -805,7 +805,7 @@ class MainActivity : ComponentActivity() {
             message = {
                 CupertinoText(
                     "Это игра Gear VR: без телефона Samsung и драйвера Oculus она сразу закрывается. " +
-                        "PhoneXR заменит в ней libvrapi.so переходником на OpenXR и подпишет своей подписью. " +
+                        "LostXR заменит в ней libvrapi.so переходником на OpenXR и подпишет своей подписью. " +
                         "Оригинал придётся удалить (подпись другая), сохранения игры при этом пропадут."
                 )
             }
@@ -862,7 +862,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             GameLibrary.Kind.GEAR_VR_UNSUPPORTED -> error =
-                "«${game.label}» — игра Gear VR, которую PhoneXR запустить не может: " +
+                "«${game.label}» — игра Gear VR, которую LostXR запустить не может: " +
                     "у неё нет сборки для ARM (arm64-v8a или armeabi-v7a)."
             else -> requestStart(game)
         }
@@ -909,7 +909,7 @@ class MainActivity : ComponentActivity() {
                     ready = Ready(result, label, conflict)
                 }
             } catch (failure: Throwable) {
-                android.util.Log.e("PhoneXR-Patch", "APK preparation failed for $uri", failure)
+                android.util.Log.e("LostXR-Patch", "APK preparation failed for $uri", failure)
                 runOnUiThread {
                     busy = null
                     error = failure.localizedMessage ?: failure.javaClass.simpleName
@@ -933,7 +933,7 @@ class MainActivity : ComponentActivity() {
     /** Opens the system installer for an APK in the shared cache folder. */
     private fun installApk(file: File) {
         if (!packageManager.canRequestPackageInstalls()) {
-            error = "Разрешите PhoneXR устанавливать приложения, вернитесь и скачайте снова."
+            error = "Разрешите LostXR устанавливать приложения, вернитесь и скачайте снова."
             startActivity(Intent(AndroidSettings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
             return
         }
@@ -950,7 +950,7 @@ class MainActivity : ComponentActivity() {
 
     private fun install(result: ApkPatcher.Result) {
         if (!packageManager.canRequestPackageInstalls()) {
-            error = "Разрешите PhoneXR устанавливать приложения, вернитесь и нажмите «Установить» снова."
+            error = "Разрешите LostXR устанавливать приложения, вернитесь и нажмите «Установить» снова."
             startActivity(Intent(AndroidSettings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
             return
         }

@@ -37,13 +37,13 @@ import zone.ien.hig.theme.CupertinoTheme
 import zone.ien.hig.theme.darkColorScheme
 import zone.ien.hig.theme.lightColorScheme
 
-/** PhoneXR orange, the accent of the launcher icon. */
+/** LostXR orange, the accent of the launcher icon. */
 private val orange = Color(0xFFFF7A1A)
 private val orangeDark = Color(0xFFFF9544)
 
-/** Apple HIG look (compose-hig) in light and dark, with the PhoneXR accent. */
+/** Apple HIG look (compose-hig) in light and dark, with the LostXR accent. */
 @Composable
-fun PhoneXRTheme(content: @Composable () -> Unit) {
+fun LostXRTheme(content: @Composable () -> Unit) {
     val colors = if (isSystemInDarkTheme()) darkColorScheme(accent = orangeDark) else lightColorScheme(accent = orange)
     CupertinoTheme(colorScheme = colors, content = content)
 }

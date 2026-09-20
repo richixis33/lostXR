@@ -43,7 +43,7 @@ class CallContent(private val context: Context) : VrWindow.Content {
         thread { Calls.start(context) }
         thread { friends = runCatching { Friends.mine(context) }.getOrDefault(emptyList()); fresh = true }
         voice = VoiceHub.acquire(context)
-        thread(name = "PhoneXR calls") {
+        thread(name = "LostXR calls") {
             while (running) {
                 draw()
                 Thread.sleep(if (Calls.state == Calls.State.IN_CALL) 50 else 200)
@@ -102,8 +102,8 @@ class CallContent(private val context: Context) : VrWindow.Content {
     private fun offline() {
         center(tr("Звонки"), 200f, 64f, bold = true)
         val signedIn = Account.current(context) != null
-        center(if (signedIn) "Подключение…" else "Войдите в аккаунт PhoneXR", 440f, 44f)
-        if (!signedIn) center("На телефоне: PhoneXR → Настройки → Аккаунт", 510f, 34f, color = GREY)
+        center(if (signedIn) "Подключение…" else "Войдите в аккаунт LostXR", 440f, 44f)
+        if (!signedIn) center("На телефоне: LostXR → Настройки → Аккаунт", 510f, 34f, color = GREY)
         else button(RectF(500f, 620f, 900f, 710f), "Повторить", BLUE) { Calls.stop(); Calls.start(context) }
     }
 

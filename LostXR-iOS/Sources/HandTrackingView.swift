@@ -27,7 +27,7 @@ private final class HandCameraController: UIViewController, AVCaptureVideoDataOu
     private let session = AVCaptureSession()
     private let preview = AVCaptureVideoPreviewLayer()
     private let dots = CAShapeLayer()
-    private let queue = DispatchQueue(label: "PhoneXR.Vision", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "LostXR.Vision", qos: .userInitiated)
     private var lastFrame = CFAbsoluteTimeGetCurrent()
 
     override func viewDidLoad() {

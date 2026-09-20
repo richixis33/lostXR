@@ -27,7 +27,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Elix, the PhoneXR assistant (a Claude model behind a Supabase Edge Function). Like Siri it
+ * Elix, the LostXR assistant (a Claude model behind a Supabase Edge Function). Like Siri it
  * listens — ask out loud or type on the VR keyboard — but it answers in text, it does not speak.
  */
 object Elix {
@@ -35,7 +35,7 @@ object Elix {
 
     /** Network call: Elix's answer to the conversation so far, or an error text. */
     fun ask(context: Context, history: List<Message>): Result<String> = runCatching {
-        val token = Account.token(context) ?: error(tr("Войдите в аккаунт PhoneXR, чтобы говорить с Elix"))
+        val token = Account.token(context) ?: error(tr("Войдите в аккаунт LostXR, чтобы говорить с Elix"))
         val messages = JSONArray()
         history.takeLast(20).forEach { messages.put(JSONObject().put("role", if (it.fromUser) "user" else "assistant").put("content", it.text)) }
         val connection = URL("${GameStore.URL_BASE}/functions/v1/elix").openConnection() as HttpURLConnection
@@ -86,7 +86,7 @@ class ElixContent(
     override val keyboardRequested get() = typing
 
     override fun attach(context: Context, texture: SurfaceTexture?, onReady: () -> Unit) {
-        thread(name = "PhoneXR Elix") {
+        thread(name = "LostXR Elix") {
             while (running) {
                 draw()
                 Thread.sleep(if (listening || thinking) 40 else 120)

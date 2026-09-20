@@ -95,7 +95,7 @@ class AndroidAppsContent(private val context: Context, private val open: (packag
 
         private const val PREFS = "android_apps"
 
-        /** The store's "Get" for this PhoneXR app: it then shows on the VR home screen. */
+        /** The store's "Get" for this LostXR app: it then shows on the VR home screen. */
         fun enabled(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("enabled", false)
 
         fun setEnabled(context: Context, value: Boolean) =

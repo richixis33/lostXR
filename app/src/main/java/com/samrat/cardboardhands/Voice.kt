@@ -42,7 +42,7 @@ class Voice(private val context: Context) {
     fun start() {
         if (running) return
         running = true
-        thread = kotlin.concurrent.thread(name = "PhoneXR voice") {
+        thread = kotlin.concurrent.thread(name = "LostXR voice") {
             val record = runCatching {
                 AudioRecord(
                     MediaRecorder.AudioSource.VOICE_COMMUNICATION, RATE,
@@ -139,7 +139,7 @@ class Voice(private val context: Context) {
     }
 
     private companion object {
-        const val TAG = "PhoneXR-Voice"
+        const val TAG = "LostXR-Voice"
         const val RATE = 16_000
         /** 20 ms of sound per loudness step. */
         const val FRAME = 320

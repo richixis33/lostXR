@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.acos
 import kotlin.math.roundToInt
 
-/** Teaches PhoneXR the colour and shape of the Joy-Con and shows how the camera sees them. */
+/** Teaches LostXR the colour and shape of the Joy-Con and shows how the camera sees them. */
 class JoyConCameraActivity : ComponentActivity() {
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     /** One thread owns the vision buffers: frame processing and the "remember" buttons alike. */
@@ -69,7 +69,7 @@ class JoyConCameraActivity : ComponentActivity() {
         state = Settings.load(this)
         // The tracking service holds the camera; this screen needs it for itself.
         stopService(Intent(this, HandTrackingService::class.java))
-        setContent { PhoneXRTheme { Screen() } }
+        setContent { LostXRTheme { Screen() } }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             bindCamera()
         } else {

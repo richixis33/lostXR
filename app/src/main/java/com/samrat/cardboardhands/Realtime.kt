@@ -112,7 +112,7 @@ class Realtime(private val token: String, private val listener: Listener) {
     private fun meta(entry: JSONObject?): JSONObject? = entry?.optJSONArray("metas")?.optJSONObject(0)
 
     private companion object {
-        const val TAG = "PhoneXR-Realtime"
+        const val TAG = "LostXR-Realtime"
     }
 }
 

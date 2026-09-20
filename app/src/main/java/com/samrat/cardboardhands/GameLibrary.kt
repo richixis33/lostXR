@@ -7,12 +7,12 @@ import android.content.pm.PackageManager
 import java.io.File
 import java.util.zip.ZipFile
 
-/** Installed VR games PhoneXR can start, found by what their APK carries. */
+/** Installed VR games LostXR can start, found by what their APK carries. */
 object GameLibrary {
     enum class Kind {
         /** OpenXR game, starts as is. */
         OPENXR,
-        /** Gear VR game with the PhoneXR adapter in place of libvrapi.so. */
+        /** Gear VR game with the LostXR adapter in place of libvrapi.so. */
         GEAR_VR_READY,
         /** Gear VR game as it came from the store: needs patching before it runs. */
         GEAR_VR_ORIGINAL,
@@ -131,7 +131,7 @@ object GameLibrary {
 
     fun describe(kind: Kind) = when (kind) {
         Kind.OPENXR -> "OpenXR"
-        Kind.GEAR_VR_READY -> "Gear VR · через переходник PhoneXR"
+        Kind.GEAR_VR_READY -> "Gear VR · через переходник LostXR"
         Kind.GEAR_VR_ORIGINAL -> "Gear VR · нужно пропатчить"
         Kind.GEAR_VR_UNSUPPORTED -> "Gear VR · не поддерживается"
         Kind.DAYDREAM -> "Daydream / Cardboard"

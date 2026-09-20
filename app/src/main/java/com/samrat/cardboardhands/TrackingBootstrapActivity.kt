@@ -8,7 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 
-/** Protected entry point used by PhoneXR-signed OpenXR games to start hand tracking. */
+/** Protected entry point used by LostXR-signed OpenXR games to start hand tracking. */
 class TrackingBootstrapActivity : ComponentActivity() {
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startHands()

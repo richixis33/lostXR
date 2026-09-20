@@ -34,7 +34,7 @@ object ElixCommands {
                 Answer(tr("Привет") + (name?.let { ", $it" } ?: "") + "! " + tr("Чем помочь?"))
             has("как дела", "how are you", "tudo bem", "como vai", "como estás") -> Answer(tr("Отлично! Готова помочь."))
             has("спасибо", "thank", "obrigad") -> Answer(tr("Пожалуйста!"))
-            has("кто ты", "who are you", "quem é você", "quem és") -> Answer(tr("Я Elix, ассистент PhoneXR."))
+            has("кто ты", "who are you", "quem é você", "quem és") -> Answer(tr("Я Elix, ассистент LostXR."))
             has("что ты умеешь", "помощь", "команды", "help", "what can you do", "ajuda") -> Answer(tr(
                 "Быстрые команды: «привет», «который час», «какое сегодня число», «заряд», «открой браузер / фото / " +
                     "настройки / магазин / звонки», «сделай фото», «выровняй», «граница», «выйди из VR». " +

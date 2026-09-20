@@ -155,7 +155,7 @@ class ArTracker private constructor(private val session: Session) {
     }
 
     companion object {
-        private const val TAG = "PhoneXR-AR"
+        private const val TAG = "LostXR-AR"
 
         /** ARCore's answer can take a moment on the first call: CHECKING means ask again shortly. */
         fun availability(activity: Activity): Availability {

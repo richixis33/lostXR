@@ -139,7 +139,7 @@ class Onboarding(private val context: Context, private val host: Host) {
             Step.PERSONA -> {
                 card()
                 title("Персона")
-                body("Ваша копия для VR: руки и лицо. Сначала PhoneXR изучит руки, затем лицо через камеру телефона.")
+                body("Ваша копия для VR: руки и лицо. Сначала LostXR изучит руки, затем лицо через камеру телефона.")
                 button(RectF(WIDTH / 2f - 460f, 720f, WIDTH / 2f - 20f, 820f), "Пропустить", Color.argb(90, 255, 255, 255)) { go(Step.NAME) }
                 button(RectF(WIDTH / 2f + 20f, 720f, WIDTH / 2f + 460f, 820f), "Начать") { go(Step.HANDS) }
             }
@@ -182,7 +182,7 @@ class Onboarding(private val context: Context, private val host: Host) {
             Step.ROOM -> {
                 card()
                 title("Настройка комнаты")
-                body("Обойдите свободное место по краю — PhoneXR запомнит границу. Круг замкнётся сам, щипок — готово.")
+                body("Обойдите свободное место по краю — LostXR запомнит границу. Круг замкнётся сам, щипок — готово.")
                 button(RectF(WIDTH / 2f - 220f, 760f, WIDTH / 2f + 220f, 860f), "Пропустить", Color.argb(90, 255, 255, 255)) { go(Step.PINCH) }
                 if (host.boundaryReady() && t > 1f) go(Step.PINCH)
             }

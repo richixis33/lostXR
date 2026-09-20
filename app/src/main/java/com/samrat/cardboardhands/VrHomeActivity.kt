@@ -57,7 +57,7 @@ import kotlin.math.atan2
 import kotlin.math.hypot
 
 /**
- * PhoneXR Home, visionOS style, in mixed reality: the camera image fills the view, round app icons
+ * LostXR Home, visionOS style, in mixed reality: the camera image fills the view, round app icons
  * float in front, apps open as windows (browser, Minecraft, Spatial Photos) with a move bar,
  * minimize to the dock and close. Pinch clicks; palm toward the face plus a pinch opens the menu.
  * With "controllers" chosen in settings and a Joy-Con connected, ZR or A clicks instead of a pinch.
@@ -204,7 +204,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         if (ar?.resume() == false) { ar?.close(); ar = null; toast("6DoF недоступен: работает 3DoF") }
         surfaceView.onResume()
         tracker.start()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) toast("Разрешите PhoneXR доступ к камере")
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) toast("Разрешите LostXR доступ к камере")
         else if (ar == null) {
             bindCamera()
             if (Settings.load(this).sixDof) startArLater()
@@ -216,7 +216,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         Calls.localHands = { handPoints }
         Calls.unlisten(callListener)
         Calls.listen(callListener)
-        thread(name = "PhoneXR calls start") { Calls.start(this) }
+        thread(name = "LostXR calls start") { Calls.start(this) }
     }
 
     override fun onPause() {
@@ -300,7 +300,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
 
     private val storeHost = object : StoreContent.Host {
         override fun openCinema(packageName: String, scene: String) = runOnUiThread {
-            if (VirtualScreen.access() != VirtualScreen.Access.READY) return@runOnUiThread toast("Запустите Shizuku и разрешите доступ PhoneXR")
+            if (VirtualScreen.access() != VirtualScreen.Access.READY) return@runOnUiThread toast("Запустите Shizuku и разрешите доступ LostXR")
             startActivity(Intent(this@VrHomeActivity, CinemaActivity::class.java)
                 .putExtra(CinemaActivity.EXTRA_PACKAGE, packageName).putExtra(CinemaActivity.EXTRA_SCENE, scene))
         }
@@ -312,7 +312,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         override fun openCalls() = this@VrHomeActivity.openCalls()
 
         override fun install(file: java.io.File) = runOnUiThread {
-            if (!packageManager.canRequestPackageInstalls()) return@runOnUiThread toast("Разрешите PhoneXR устанавливать приложения")
+            if (!packageManager.canRequestPackageInstalls()) return@runOnUiThread toast("Разрешите LostXR устанавливать приложения")
             val content = androidx.core.content.FileProvider.getUriForFile(this@VrHomeActivity, "$packageName.patched.apks", file)
             startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(content, "application/vnd.android.package-archive")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -370,11 +370,11 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     // ------------------------------------------------------------------ Apps and windows
 
     private fun loadApps() {
-        thread(name = "PhoneXR home apps") {
+        thread(name = "LostXR home apps") {
             val found = runCatching { GameLibrary.scan(this) }.getOrDefault(emptyList())
                 .filter { it.kind != GameLibrary.Kind.GEAR_VR_ORIGINAL && it.kind != GameLibrary.Kind.GEAR_VR_UNSUPPORTED }
             games = found.associateBy { it.packageName }
-            // Minecraft stays in the PhoneXR app (PXR Bedrock), not on the MR home screen.
+            // Minecraft stays in the LostXR app (PXR Bedrock), not on the MR home screen.
             // iOS 27 icons (light or dark, chosen with a long pinch on the home) where the pack has one.
             fun own(id: String, drawn: () -> Drawable) = IconPack.OWN[id]?.let { IconPack.icon(this, it) } ?: drawn()
             val own = listOf(
@@ -421,7 +421,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
             id == ID_ANDROID -> openWindow("android", tr("Android‑приложения"), ID_ANDROID) {
                 AndroidAppsContent(this) { name, label ->
                     runOnUiThread {
-                        if (VirtualScreen.access() != VirtualScreen.Access.READY) toast("Запустите Shizuku и разрешите доступ PhoneXR")
+                        if (VirtualScreen.access() != VirtualScreen.Access.READY) toast("Запустите Shizuku и разрешите доступ LostXR")
                         else openWindow("app:$name", label, ID_ANDROID) { ShizukuAppContent(name) { toast(it) } }
                     }
                 }
@@ -523,21 +523,21 @@ class VrHomeActivity : Activity(), LifecycleOwner {
         redraw.set(true)
     }
 
-    /** A page asked for an immersive WebXR session: the WebView has none, so the PhoneXR browser (OpenXR) takes over. */
+    /** A page asked for an immersive WebXR session: the WebView has none, so the LostXR browser (OpenXR) takes over. */
     private fun openWebXr(url: String) = runOnUiThread {
-        if (WebApps.browserPackage(this) == null) return@runOnUiThread toast("Для WebXR установите «Браузер PhoneXR» с сайта или из магазина")
+        if (WebApps.browserPackage(this) == null) return@runOnUiThread toast("Для WebXR установите «Браузер LostXR» с сайта или из магазина")
         cameraProvider?.unbindAll()
         ContextCompat.startForegroundService(this, Intent(this, HandTrackingService::class.java))
         if (!WebApps.open(this, url)) toast("Не удалось открыть WebXR")
     }
 
-    /** Real photo: the current passthrough frame goes to the gallery (Pictures/PhoneXR). */
+    /** Real photo: the current passthrough frame goes to the gallery (Pictures/LostXR). */
     private fun takePhoto() {
         val bitmap = arPhoto?.takeIf { !it.isRecycled }?.let { runCatching { it.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() }
             ?: synchronized(frameLock) { frame?.takeIf { !it.isRecycled }?.copy(Bitmap.Config.ARGB_8888, false) }
             ?: return toast("Камера ещё не готова")
         switchMode(HomePanel.Mode.HOME)
-        thread(name = "PhoneXR photo") {
+        thread(name = "LostXR photo") {
             val saved = runCatching { Daydream.savePhoto(this, bitmap) }.isSuccess
             bitmap.recycle()
             toast(if (saved) "Фото сохранено в «Фото»" else "Не удалось сохранить фото")
@@ -1733,7 +1733,7 @@ class VrHomeActivity : Activity(), LifecycleOwner {
     }
 
     companion object {
-        private const val TAG = "PhoneXR-Home"
+        private const val TAG = "LostXR-Home"
         const val MINECRAFT = "com.mojang.minecraftpe"
         private const val ID_BROWSER = "own:browser"
         private const val ID_STORE = "own:store"

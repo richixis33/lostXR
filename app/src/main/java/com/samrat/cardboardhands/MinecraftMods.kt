@@ -10,7 +10,7 @@ import java.io.File
 /**
  * Mods for Minecraft Bedrock: add-ons (.mcaddon), resource and behaviour packs (.mcpack), worlds
  * (.mcworld) and world templates (.mctemplate). Minecraft imports them itself when such a file is
- * opened with it, so PhoneXR only has to fetch the file and hand it over.
+ * opened with it, so LostXR only has to fetch the file and hand it over.
  *
  * Mods in the store live in the "minecraft_mods" folder next to the games (vr_games/minecraft_mods/).
  */

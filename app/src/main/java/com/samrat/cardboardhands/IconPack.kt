@@ -16,7 +16,7 @@ object IconPack {
     private val cache = HashMap<String, Drawable?>()
     private var files: Map<Theme, List<String>>? = null
 
-    /** Icons for PhoneXR's own apps, taken from the pack. */
+    /** Icons for LostXR's own apps, taken from the pack. */
     val OWN = mapOf(
         "own:browser" to "com.android.browser",
         "own:photos" to "com.miui.gallery",

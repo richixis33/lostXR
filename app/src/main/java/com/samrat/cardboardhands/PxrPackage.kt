@@ -17,7 +17,7 @@ object PxrPackage {
         if (!name.lowercase().endsWith(".pxr")) return source
 
         val folder = File(context.cacheDir, "patched").apply { mkdirs() }
-        val output = File(folder, "PhoneXR-package-game.apk").apply { delete() }
+        val output = File(folder, "LostXR-package-game.apk").apply { delete() }
         var validManifest = false
         var foundAndroid = false
         context.contentResolver.openInputStream(source).use { raw ->
@@ -39,7 +39,7 @@ object PxrPackage {
                 }
             }
         }
-        require(validManifest) { "Это не пакет PhoneXR .pxr" }
+        require(validManifest) { "Это не пакет LostXR .pxr" }
         require(foundAndroid && output.length() > 0) { "В .pxr нет Android APK" }
         return FileProvider.getUriForFile(context, "${context.packageName}.patched.apks", output)
     }

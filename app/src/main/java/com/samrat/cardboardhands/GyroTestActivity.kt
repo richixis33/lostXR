@@ -38,7 +38,7 @@ class GyroTestActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { PhoneXRTheme { Screen() } }
+        setContent { LostXRTheme { Screen() } }
     }
 
     override fun onStart() {

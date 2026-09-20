@@ -92,7 +92,7 @@ private class TouchEvents(private val width: Int, private val height: Int, priva
     }
 }
 
-/** The PhoneXR browser: a WebView on the app's own virtual display, drawn into the window. */
+/** The LostXR browser: a WebView on the app's own virtual display, drawn into the window. */
 class BrowserContent(private val startUrl: String, private val onWebXr: (String) -> Unit = {}) : VrWindow.Content {
     override val pixelWidth = 1600
     override val pixelHeight = 1000
@@ -153,9 +153,9 @@ class BrowserContent(private val startUrl: String, private val onWebXr: (String)
         val surface = Surface(texture)
         main.post {
             val manager = context.getSystemService(DisplayManager::class.java)
-            // A private display owned by PhoneXR: no special permission needed for our own content.
+            // A private display owned by LostXR: no special permission needed for our own content.
             // 280 dpi reads like a tablet at arm's length in VR.
-            val created = manager.createVirtualDisplay("PhoneXR Browser", pixelWidth, pixelHeight, 280, surface, 0)
+            val created = manager.createVirtualDisplay("LostXR Browser", pixelWidth, pixelHeight, 280, surface, 0)
             display = created
             val view = WebView(context).apply {
                 settings.javaScriptEnabled = true
@@ -177,7 +177,7 @@ class BrowserContent(private val startUrl: String, private val onWebXr: (String)
                     override fun onPageFinished(view: WebView, address: String?) = view.evaluateJavascript(PAGE_SCRIPT, null)
                 }
                 webChromeClient = WebChromeClient()
-                addJavascriptInterface(Bridge(), "PhoneXR")
+                addJavascriptInterface(Bridge(), "LostXR")
                 loadUrl(startUrl)
             }
             webView = view
@@ -223,7 +223,7 @@ class BrowserContent(private val startUrl: String, private val onWebXr: (String)
         /**
          * Runs in every page: reports focused text fields so the VR keyboard shows, types into them,
          * and offers WebXR. The WebView has no WebXR of its own, so an immersive session opens the page
-         * in the PhoneXR browser (Wolvic engine, OpenXR).
+         * in the LostXR browser (Wolvic engine, OpenXR).
          */
         private val PAGE_SCRIPT = """
             (function() {
@@ -236,11 +236,11 @@ class BrowserContent(private val startUrl: String, private val onWebXr: (String)
                 if (tag == 'input') return ['text','search','email','url','tel','password','number',''].indexOf((e.type || '').toLowerCase()) >= 0 && !e.readOnly;
                 return e.isContentEditable;
               }
-              function pick(ev) { var t = ev.target; if (editable(t)) { field = t; PhoneXR.keyboard(true); } }
+              function pick(ev) { var t = ev.target; if (editable(t)) { field = t; LostXR.keyboard(true); } }
               document.addEventListener('focusin', pick, true);
               document.addEventListener('click', pick, true);
               document.addEventListener('focusout', function(ev) {
-                if (ev.target === field) setTimeout(function() { if (document.activeElement !== field) PhoneXR.keyboard(false); }, 150);
+                if (ev.target === field) setTimeout(function() { if (document.activeElement !== field) LostXR.keyboard(false); }, 150);
               }, true);
               window.__pxrType = function(text, back) {
                 var e = field || document.activeElement;
@@ -255,7 +255,7 @@ class BrowserContent(private val startUrl: String, private val onWebXr: (String)
                   var go = e.dispatchEvent(new KeyboardEvent('keydown', opts));
                   e.dispatchEvent(new KeyboardEvent('keyup', opts));
                   if (go && e.form) { if (e.form.requestSubmit) e.form.requestSubmit(); else e.form.submit(); }
-                  PhoneXR.keyboard(false);
+                  LostXR.keyboard(false);
                   return;
                 }
                 var start = e.selectionStart, end = e.selectionEnd;
@@ -271,8 +271,8 @@ class BrowserContent(private val startUrl: String, private val onWebXr: (String)
                 var xr = {
                   isSessionSupported: function(mode) { return Promise.resolve(mode == 'immersive-vr' || mode == 'immersive-ar' || mode == 'inline'); },
                   requestSession: function(mode) {
-                    PhoneXR.enterXr(location.href);
-                    return Promise.reject(new DOMException('Opening in the PhoneXR immersive browser', 'NotSupportedError'));
+                    LostXR.enterXr(location.href);
+                    return Promise.reject(new DOMException('Opening in the LostXR immersive browser', 'NotSupportedError'));
                   },
                   addEventListener: function() {}, removeEventListener: function() {}, ondevicechange: null
                 };
@@ -301,7 +301,7 @@ class ShizukuAppContent(private val packageName: String, private val onError: (S
         val surface = Surface(texture)
         Handler(Looper.getMainLooper()).post {
             if (VirtualScreen.access() != VirtualScreen.Access.READY) {
-                onError("Запустите Shizuku и разрешите доступ PhoneXR")
+                onError("Запустите Shizuku и разрешите доступ LostXR")
                 return@post
             }
             connection = VirtualScreen.bind(context) { bound ->
@@ -381,7 +381,7 @@ class PhotosContent(private val context: Context) : VrWindow.Content {
     private var page = 0
 
     override fun attach(context: Context, texture: SurfaceTexture?, onReady: () -> Unit) {
-        thread(name = "PhoneXR photos") {
+        thread(name = "LostXR photos") {
             photos = query()
             draw()
             onReady()

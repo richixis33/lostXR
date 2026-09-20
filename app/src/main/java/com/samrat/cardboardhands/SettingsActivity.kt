@@ -40,7 +40,7 @@ class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         state = Settings.load(this)
-        setContent { PhoneXRTheme { Screen() } }
+        setContent { LostXRTheme { Screen() } }
     }
 
     override fun onResume() {
@@ -107,7 +107,7 @@ class SettingsActivity : ComponentActivity() {
                 footer = if (interceptEnabled) "Нажмите кнопку на Joy‑Con — она подсветится на схеме. " +
                     "Нажмите на кнопку на схеме, чтобы назначить ей действие."
                 else "Без перехвата кнопки Joy‑Con уходят игре как геймпад, а не как контроллеры VR. " +
-                    "Включите «PhoneXR Joy‑Con» в «Специальных возможностях»."
+                    "Включите «LostXR Joy‑Con» в «Специальных возможностях»."
             ) {
                 HigRow(
                     "Перехват кнопок",
@@ -212,7 +212,7 @@ class SettingsActivity : ComponentActivity() {
         CupertinoAlertDialog(
             onDismissRequest = stop,
             title = { CupertinoText("Нажмите кнопку на Joy‑Con") },
-            message = { CupertinoText("PhoneXR ждёт нажатия. Дальше выберите, что эта кнопка делает в VR.") }
+            message = { CupertinoText("LostXR ждёт нажатия. Дальше выберите, что эта кнопка делает в VR.") }
         ) { cancel(onClick = stop) { CupertinoText("Отмена") } }
     }
 

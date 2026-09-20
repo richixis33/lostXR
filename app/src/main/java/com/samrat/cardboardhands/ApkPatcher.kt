@@ -25,7 +25,7 @@ object ApkPatcher {
     )
 
     /**
-     * ABI folders PhoneXR can serve, with the assets that go into them: the OpenXR loader and the
+     * ABI folders LostXR can serve, with the assets that go into them: the OpenXR loader and the
      * Gear VR adapter (gearvr-shim: VrApi served through OpenXR, so Gear VR games need no Samsung phone).
      * Old 32-bit games keep their libraries in "armeabi"; a 64-bit phone runs them with the v7a build.
      */
@@ -41,13 +41,13 @@ object ApkPatcher {
         }
     }
 
-    /** [gearVr] is true when the game draws through VrApi and got the PhoneXR adapter. */
+    /** [gearVr] is true when the game draws through VrApi and got the LostXR adapter. */
     data class Result(val apk: File, val changes: List<String>, val gearVr: Boolean)
 
     fun patch(context: Context, source: Uri): Result {
         val directory = File(context.cacheDir, "patched").apply { mkdirs() }
         val unsigned = File(directory, "unsigned.apk")
-        val output = File(directory, "PhoneXR-patched.apk")
+        val output = File(directory, "LostXR-patched.apk")
         unsigned.delete()
         output.delete()
         val assets = HashMap<String, ByteArray?>()
@@ -81,7 +81,7 @@ object ApkPatcher {
                         else if (name.startsWith("lib/") && name.endsWith(".so")) otherLibs = true
                         if (name.startsWith("lib/") && fileName in ENTITLEMENT && !checksPurchase) {
                             checksPurchase = true
-                            changes += "в игре есть проверка покупки Oculus ($fileName). PhoneXR её не трогает: " +
+                            changes += "в игре есть проверка покупки Oculus ($fileName). LostXR её не трогает: " +
                                 "если игра действительно её требует, она не запустится"
                         }
 
@@ -94,15 +94,15 @@ object ApkPatcher {
                             }
                             abi != null && name == "lib/${abi.folder}/$LOADER" -> {
                                 loaderIn += abi
-                                changes += "OpenXR loader (${abi.title}) заменён на сборку PhoneXR"
-                                requireNotNull(asset(abi.loaderAsset)) { "В PhoneXR нет OpenXR loader для ${abi.title}" }
+                                changes += "OpenXR loader (${abi.title}) заменён на сборку LostXR"
+                                requireNotNull(asset(abi.loaderAsset)) { "В LostXR нет OpenXR loader для ${abi.title}" }
                             }
                             abi != null && name == "lib/${abi.folder}/$VRAPI" -> {
                                 vrapiIn += abi
                                 gearVr = true
                                 changes += "libvrapi.so (${abi.title}) заменён переходником Gear VR → OpenXR"
                                 requireNotNull(asset(abi.vrapiAsset)) {
-                                    "Это игра Gear VR (${abi.title}), а в эту сборку PhoneXR не вложен переходник для неё"
+                                    "Это игра Gear VR (${abi.title}), а в эту сборку LostXR не вложен переходник для неё"
                                 }
                             }
                             else -> null
@@ -136,12 +136,12 @@ object ApkPatcher {
                     }
                     // A Gear VR game ships without OpenXR; the adapter loads it from the game's lib folder.
                     for (abi in vrapiIn - loaderIn) {
-                        val loader = requireNotNull(asset(abi.loaderAsset)) { "В PhoneXR нет OpenXR loader для ${abi.title}" }
+                        val loader = requireNotNull(asset(abi.loaderAsset)) { "В LostXR нет OpenXR loader для ${abi.title}" }
                         val name = "lib/${abi.folder}/$LOADER"
                         zip.putNextEntry(storedEntry(name, loader, counting.count))
                         zip.write(loader)
                         zip.closeEntry()
-                        changes += "добавлен OpenXR loader PhoneXR (${abi.title})"
+                        changes += "добавлен OpenXR loader LostXR (${abi.title})"
                     }
                 }
             }
@@ -152,7 +152,7 @@ object ApkPatcher {
         require(abis.isNotEmpty() || !otherLibs) {
             "В APK нет библиотек для ARM (arm64-v8a или armeabi-v7a) — на телефоне такая сборка не запустится"
         }
-        if (Abi.ARM64 !in abis && abis.isNotEmpty()) changes += "32-битная игра: PhoneXR запустит её в 32-битном режиме"
+        if (Abi.ARM64 !in abis && abis.isNotEmpty()) changes += "32-битная игра: LostXR запустит её в 32-битном режиме"
         sign(context, unsigned, output)
         unsigned.delete()
         if (changes.isEmpty()) changes += "APK уже подходит, изменена только подпись"
@@ -183,7 +183,7 @@ object ApkPatcher {
         context.assets.open("phonexr-signing.p12").use { store.load(it, "android".toCharArray()) }
         val key = store.getKey("androiddebugkey", "android".toCharArray()) as java.security.PrivateKey
         val certificate = store.getCertificate("androiddebugkey") as X509Certificate
-        val signer = ApkSigner.SignerConfig.Builder("PhoneXR", key, listOf(certificate)).build()
+        val signer = ApkSigner.SignerConfig.Builder("LostXR", key, listOf(certificate)).build()
         ApkSigner.Builder(listOf(signer))
             .setInputApk(input)
             .setOutputApk(output)

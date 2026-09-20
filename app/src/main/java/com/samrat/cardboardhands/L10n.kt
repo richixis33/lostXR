@@ -3,7 +3,7 @@ package com.samrat.cardboardhands
 import android.content.Context
 
 /**
- * PhoneXR's languages. The interface is written in Russian; [tr] gives the chosen language's text
+ * LostXR's languages. The interface is written in Russian; [tr] gives the chosen language's text
  * for a Russian source string (untranslated strings stay Russian).
  */
 object L10n {
@@ -77,7 +77,7 @@ object L10n {
         "Продолжить" to arrayOf("Continue", "Continuar", "Continuar"),
         "Не получилось" to arrayOf("Something went wrong", "Não deu certo", "Não foi possível"),
         "VR‑режимы" to arrayOf("VR modes", "Modos VR", "Modos VR"),
-        "Приложения PhoneXR" to arrayOf("PhoneXR apps", "Apps PhoneXR", "Apps PhoneXR"),
+        "Приложения LostXR" to arrayOf("LostXR apps", "Apps LostXR", "Apps LostXR"),
         "Android‑приложения" to arrayOf("Android apps", "Apps Android", "Apps Android"),
         "Веб‑приложения" to arrayOf("Web apps", "Apps web", "Apps web"),
         "Моды Minecraft" to arrayOf("Minecraft mods", "Mods do Minecraft", "Mods do Minecraft"),
@@ -108,7 +108,7 @@ object L10n {
         "Автообновление" to arrayOf("Automatic Updates", "Atualizações Automáticas", "Atualizações automáticas"),
         "Бета‑обновления" to arrayOf("Beta Updates", "Atualizações Beta", "Atualizações beta"),
         "Обновить сейчас" to arrayOf("Update Now", "Atualizar Agora", "Atualizar agora"),
-        "Установлена последняя версия" to arrayOf("PhoneXR is up to date", "O PhoneXR está atualizado", "O PhoneXR está atualizado"),
+        "Установлена последняя версия" to arrayOf("LostXR is up to date", "O LostXR está atualizado", "O LostXR está atualizado"),
         // Calls and friends
         "Позвонить" to arrayOf("Call", "Ligar", "Ligar"),
         "Принять" to arrayOf("Accept", "Aceitar", "Aceitar"),
@@ -134,7 +134,7 @@ object L10n {
         "Чем помочь?" to arrayOf("How can I help?", "Como posso ajudar?", "Como posso ajudar?"),
         "Отлично! Готова помочь." to arrayOf("Great! Ready to help.", "Ótima! Pronta para ajudar.", "Ótima! Pronta para ajudar."),
         "Пожалуйста!" to arrayOf("You're welcome!", "De nada!", "De nada!"),
-        "Я Elix, ассистент PhoneXR." to arrayOf("I'm Elix, the PhoneXR assistant.", "Sou a Elix, a assistente do PhoneXR.", "Sou a Elix, a assistente do PhoneXR."),
+        "Я Elix, ассистент LostXR." to arrayOf("I'm Elix, the LostXR assistant.", "Sou a Elix, a assistente do LostXR.", "Sou a Elix, a assistente do LostXR."),
         "Сейчас" to arrayOf("It's", "Agora são", "São"),
         "Заряд" to arrayOf("Battery", "Bateria", "Bateria"),
         "Снимаю!" to arrayOf("Taking a photo!", "Tirando foto!", "A tirar fotografia!"),

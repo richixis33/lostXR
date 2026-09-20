@@ -1,4 +1,4 @@
-# Собирает PhoneXR на стороне GitHub и кладёт APK в релиз: так выкладка не зависит
+# Собирает LostXR на стороне GitHub и кладёт APK в релиз: так выкладка не зависит
 # от скорости домашнего интернета.
 name: Сборка и релиз
 
@@ -31,7 +31,7 @@ jobs:
         id: name
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          NAME="PhoneXR-${TAG#v}.apk"
+          NAME="LostXR-${TAG#v}.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$NAME"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
@@ -40,5 +40,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view "${{ steps.name.outputs.tag }}" >/dev/null 2>&1 \
-            || gh release create "${{ steps.name.outputs.tag }}" --title "PhoneXR ${{ steps.name.outputs.tag }}" --generate-notes
+            || gh release create "${{ steps.name.outputs.tag }}" --title "LostXR ${{ steps.name.outputs.tag }}" --generate-notes
           gh release upload "${{ steps.name.outputs.tag }}" "${{ steps.name.outputs.name }}" --clobber

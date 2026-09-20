@@ -6,15 +6,15 @@ import android.content.Intent
 import android.net.Uri
 
 /**
- * PhoneXR Runtime: the OpenXR runtime (Monado with PhoneXR's hands and Joy-Con) that OpenXR games
- * talk to. It ships inside PhoneXR (assets/runtime) and shows up in the OpenXR Runtime Broker as
- * "PhoneXR Runtime", replacing a separately installed Monado.
+ * LostXR Runtime: the OpenXR runtime (Monado with LostXR's hands and Joy-Con) that OpenXR games
+ * talk to. It ships inside LostXR (assets/runtime) and shows up in the OpenXR Runtime Broker as
+ * "LostXR Runtime", replacing a separately installed Monado.
  */
 object PhoneXrRuntime {
     const val PACKAGE = "org.freedesktop.monado.openxr_runtime.out_of_process"
     private const val ASSET = "runtime/phonexr-runtime.apk"
     private const val BROKER = "org.khronos.openxr.runtime_broker"
-    /** versionCode of the runtime bundled in this PhoneXR (openxr-runtime/build_runtime_apk.py). */
+    /** versionCode of the runtime bundled in this LostXR (openxr-runtime/build_runtime_apk.py). */
     private const val BUNDLED_VERSION = 2L
 
     enum class State { MISSING, OUTDATED, READY }
@@ -31,7 +31,7 @@ object PhoneXrRuntime {
     fun brokerInstalled(context: Context) =
         runCatching { context.packageManager.getApplicationInfo(BROKER, 0) }.isSuccess
 
-    /** The broker app, where the user picks "PhoneXR Runtime"; its Play page when it is missing. */
+    /** The broker app, where the user picks "LostXR Runtime"; its Play page when it is missing. */
     fun openBroker(activity: Activity) {
         val launch = activity.packageManager.getLaunchIntentForPackage(BROKER)
         activity.startActivity(launch ?: Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$BROKER")))

@@ -12,7 +12,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * PhoneXR updates from GitHub Releases: in the app it is "update the app", in the headset it is
+ * LostXR updates from GitHub Releases: in the app it is "update the app", in the headset it is
  * shown like a firmware update. Only the version and size are shown, no release notes.
  */
 object Updates {
@@ -29,7 +29,7 @@ object Updates {
     fun currentVersion(context: Context): String =
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "0"
 
-    /** Network call: the newest release with a PhoneXR APK, if it is newer than this app. */
+    /** Network call: the newest release with a LostXR APK, if it is newer than this app. */
     fun check(context: Context): Release? {
         val releases = if (beta(context)) {
             JSONArray(get("https://api.github.com/repos/$REPO/releases?per_page=10"))
@@ -43,7 +43,7 @@ object Updates {
             val version = release.getString("tag_name").removePrefix("v")
             val assets = release.getJSONArray("assets")
             val apk = (0 until assets.length()).map { assets.getJSONObject(it) }
-                .firstOrNull { it.getString("name").startsWith("PhoneXR") && it.getString("name").endsWith(".apk") } ?: continue
+                .firstOrNull { it.getString("name").startsWith("LostXR") && it.getString("name").endsWith(".apk") } ?: continue
             return if (newer(version, current)) Release(version, apk.getString("browser_download_url"), apk.getLong("size")) else null
         }
         return null
@@ -51,7 +51,7 @@ object Updates {
 
     /** Downloads the update into the shared cache, reporting progress 0..1. */
     fun download(context: Context, release: Release, onProgress: (Float) -> Unit): File {
-        val file = File(File(context.cacheDir, "patched").apply { mkdirs() }, "PhoneXR-${release.version}.apk")
+        val file = File(File(context.cacheDir, "patched").apply { mkdirs() }, "LostXR-${release.version}.apk")
         var address = URL(release.url)
         var connection: HttpURLConnection
         while (true) {

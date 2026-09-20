@@ -33,7 +33,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import kotlin.concurrent.thread
 
 /**
- * PhoneXR Cinema: runs any app (Minecraft, Roblox, Brawl Stars...) on a virtual display and shows it
+ * LostXR Cinema: runs any app (Minecraft, Roblox, Brawl Stars...) on a virtual display and shows it
  * as a big screen in VR with head tracking. Two hands touch the screen (a pinch is a finger);
  * gamepads and Joy-Con play the game directly.
  */
@@ -124,7 +124,7 @@ class CinemaActivity : Activity(), LifecycleOwner {
             MinecraftBridge.start()
             hands?.onConnectGesture = { typeConnect() }
         }
-        if (minecraft) thread(name = "PhoneXR Minecraft look") {
+        if (minecraft) thread(name = "LostXR Minecraft look") {
             val head = FloatArray(16)
             var lastYaw = Float.NaN
             var lastPitch = 0f
@@ -223,7 +223,7 @@ class CinemaActivity : Activity(), LifecycleOwner {
         val target = surface ?: return
         val shell = service ?: return
         if (displayId >= 0) return
-        thread(name = "PhoneXR cinema start") {
+        thread(name = "LostXR cinema start") {
             val metrics = resources.displayMetrics
             val id = runCatching {
                 shell.createDisplay(target, renderer.screenW, renderer.screenH, if (renderer.fullscreen) 280 else 320)
@@ -292,14 +292,14 @@ class CinemaActivity : Activity(), LifecycleOwner {
             }
             Thread.sleep(150)
             press(KeyEvent.KEYCODE_ENTER)
-            toast("Подключаю мод PhoneXR VR…")
+            toast("Подключаю мод LostXR VR…")
         }
     }
 
     private fun toast(text: String) = runOnUiThread { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
 
     companion object {
-        private const val TAG = "PhoneXR-Cinema"
+        private const val TAG = "LostXR-Cinema"
         const val EXTRA_PACKAGE = "package"
         const val EXTRA_SCENE = "scene"
         const val SCENE_ROOM = "room"

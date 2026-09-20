@@ -11,7 +11,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Web apps (PWA) from the PhoneXR store and the ones the user added. They open in the PhoneXR
+ * Web apps (PWA) from the LostXR store and the ones the user added. They open in the LostXR
  * browser, which runs in VR.
  *
  * Store format: a file "pwa.json" in the store folder, e.g.
@@ -22,7 +22,7 @@ object WebApps {
         fun toJson(): JSONObject = JSONObject().put("name", name).put("url", url).put("icon", icon ?: "")
     }
 
-    /** The PhoneXR browser build, then stock Wolvic it is built from. */
+    /** The LostXR browser build, then stock Wolvic it is built from. */
     private val browsers = listOf("com.samrat.pxrbrowser", "com.igalia.wolvic")
     private const val PREFS = "web_apps"
     private const val KEY = "installed"

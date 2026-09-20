@@ -11,7 +11,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * The PhoneXR app store: games are files in Supabase Storage, folder "vr_games".
+ * The LostXR app store: games are files in Supabase Storage, folder "vr_games".
  *
  * Layout the store understands:
  *   vr_games/Game.apk                     a game as a single file (.apk or .pxr)
@@ -22,7 +22,7 @@ import java.net.URLEncoder
  *                                         may be larger than Supabase's 50 MB per file. Fields:
  *                                         {"name", "url", "icon"?, "description"?, "size"?}
  *
- * The same link files also work from the root of the PhoneXR GitHub repository (e.g. opensaber.json),
+ * The same link files also work from the root of the LostXR GitHub repository (e.g. opensaber.json),
  * so a game can be published without touching Supabase at all.
  */
 object GameStore {
@@ -75,7 +75,7 @@ object GameStore {
         return items.distinctBy { it.url ?: it.path }.sortedBy { it.title.lowercase() }
     }
 
-    /** Link files (*.json with a "url") in the root of the PhoneXR GitHub repository. */
+    /** Link files (*.json with a "url") in the root of the LostXR GitHub repository. */
     private fun githubLinks(): List<Item> {
         val listing = openUrl("https://api.github.com/repos/$GITHUB_REPO/contents/").use {
             JSONArray(it.inputStream.readBytes().toString(Charsets.UTF_8))

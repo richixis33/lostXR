@@ -14,7 +14,7 @@ enum APKAnalyzer {
         guard ext == "apk" || ext == "zip" || ext == "pxr" else {
             return PackageReport(
                 title: url.deletingPathExtension().lastPathComponent,
-                details: ["Формат сохранён в библиотеке PhoneXR."],
+                details: ["Формат сохранён в библиотеке LostXR."],
                 isAndroidAPK: false,
                 hasOpenXR: false,
                 canLaunchNatively: false
@@ -32,11 +32,11 @@ enum APKAnalyzer {
             return PackageReport(
                 title: url.deletingPathExtension().lastPathComponent,
                 details: hasUnitySource ? [
-                    "PhoneXR Source Package v2",
+                    "LostXR Source Package v2",
                     "Unity-исходник включён",
                     "Соберите Android или iPhone версию через XR Bridge на Mac"
                 ] : [
-                    "PhoneXR Package v1",
+                    "LostXR Package v1",
                     hasAndroid ? "Android APK включён" : "Android APK отсутствует",
                     hasIOS ? "iPhone IPA включён" : "iPhone IPA отсутствует",
                     "IPA устанавливается через LiveContainer"

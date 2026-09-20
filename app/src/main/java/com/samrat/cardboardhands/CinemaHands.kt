@@ -32,7 +32,7 @@ class CinemaHands(
 
     /**
      * Minecraft: the game fills the whole view, each hand is a cursor on it (a pinch taps, in menus
-     * and in the game). With the PhoneXR VR mod linked, the hands and head drive the mod instead.
+     * and in the game). With the LostXR VR mod linked, the hands and head drive the mod instead.
      */
     @Volatile var minecraft = false
     /** Full-view mode: camera picture → view scale (camera aspect / eye aspect), from the renderer. */
@@ -41,7 +41,7 @@ class CinemaHands(
     @Volatile var screenWidth = CinemaRenderer.SCREEN_PIXELS_W
     @Volatile var screenHeight = CinemaRenderer.SCREEN_PIXELS_H
 
-    /** For the PhoneXR VR mod: where the hand is around the head (metres) and what it does. */
+    /** For the LostXR VR mod: where the hand is around the head (metres) and what it does. */
     private fun bridgeData(hand: Hand, shape: HandGestures.Shape, points: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>, pinching: Boolean) {
         fun d(a: Int, b: Int) = kotlin.math.hypot(points[a].x() - points[b].x(), points[a].y() - points[b].y())
         val indexOut = d(0, 8) > d(0, 6) * 1.12f
@@ -100,7 +100,7 @@ class CinemaHands(
                 val y = hand.filterY.filter(shape.aimY, now)
                 hand.u = x.coerceIn(0f, 1f)
                 hand.v = y.coerceIn(0f, 1f)
-                // Palm toward the face + pinch: PhoneXR types "/connect" into Minecraft for the mod.
+                // Palm toward the face + pinch: LostXR types "/connect" into Minecraft for the mod.
                 if (pinching && !hand.down && shape.palmToFace && !MinecraftBridge.connected) {
                     hand.down = true
                     onConnectGesture()

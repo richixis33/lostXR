@@ -332,7 +332,7 @@ class PersonaContent(private val context: Context) : VrWindow.Content {
 
     override fun attach(context: Context, texture: SurfaceTexture?, onReady: () -> Unit) {
         voice = VoiceHub.acquire(context)
-        kotlin.concurrent.thread(name = "PhoneXR persona") {
+        kotlin.concurrent.thread(name = "LostXR persona") {
             val blinker = Blinker()
             while (running) {
                 val v = voice

@@ -80,7 +80,7 @@ class SettingsContent(
         if (target == Page.UPDATE && !checked) checkUpdate()
     }
 
-    // Firmware-style update: the same PhoneXR release the app would install.
+    // Firmware-style update: the same LostXR release the app would install.
     private var release: Updates.Release? = null
     private var checked = false
     private var checking = false
@@ -107,7 +107,7 @@ class SettingsContent(
         when {
             checking -> text("Проверка обновлений…", 480f, 420f, 36f, Color.rgb(170, 170, 178))
             found == null -> {
-                text("PhoneXR ${Updates.currentVersion(context)}", 1030f, 440f, 44f, Color.WHITE, center = true, bold = true)
+                text("LostXR ${Updates.currentVersion(context)}", 1030f, 440f, 44f, Color.WHITE, center = true, bold = true)
                 text(if (checked) "Установлена последняя версия ПО" else "", 1030f, 500f, 34f, Color.rgb(170, 170, 178), center = true)
                 button(RectF(830f, 560f, 1230f, 640f), "Проверить снова") { checkUpdate() }
             }
@@ -117,7 +117,7 @@ class SettingsContent(
                 context.packageManager.getApplicationIcon(context.packageName).let {
                     it.setBounds(510, 370, 630, 490); it.draw(canvas)
                 }
-                text("PhoneXR ${found.version}", 660f, 420f, 44f, Color.WHITE, bold = true)
+                text("LostXR ${found.version}", 660f, 420f, 44f, Color.WHITE, bold = true)
                 text(Updates.formatSize(found.size), 660f, 470f, 32f, Color.rgb(170, 170, 178))
                 val progress = downloadProgress
                 button(RectF(510f, 530f, 1550f, 610f), when {
@@ -206,14 +206,14 @@ class SettingsContent(
             ?.let { it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) * 100 / it.getIntExtra(BatteryManager.EXTRA_SCALE, 100) }
         val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
         val runtime = when (PhoneXrRuntime.state(context)) {
-            PhoneXrRuntime.State.READY -> "PhoneXR Runtime"
-            PhoneXrRuntime.State.OUTDATED -> "PhoneXR Runtime (есть обновление)"
+            PhoneXrRuntime.State.READY -> "LostXR Runtime"
+            PhoneXrRuntime.State.OUTDATED -> "LostXR Runtime (есть обновление)"
             PhoneXrRuntime.State.MISSING -> "не установлен"
         }
         val rows = listOf(
             "Устройство" to "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}",
             "Android" to Build.VERSION.RELEASE,
-            "PhoneXR" to (version ?: "—"),
+            "LostXR" to (version ?: "—"),
             "Отслеживание" to host.trackingText(),
             "Экран" to "${metrics.widthPixels}×${metrics.heightPixels}, по ${metrics.widthPixels / 2}×${metrics.heightPixels} на глаз",
             "Поле зрения" to "90° по вертикали",
@@ -264,7 +264,7 @@ class SettingsContent(
         }
         val info = if (exists) "Ваше лицо для VR: моргает само, а рот двигается, когда вы говорите. " +
             "Нейросеть отличает речь от случайных звуков, микрофон очищается от шума."
-        else "Загрузите своё фото: PhoneXR найдёт на нём лицо и сделает живой портрет, " +
+        else "Загрузите своё фото: LostXR найдёт на нём лицо и сделает живой портрет, " +
             "который моргает и говорит вашим голосом."
         wrap(info, if (exists) 940f else 480f, 190f, if (exists) 1560f else 1560f, 34f)
         status?.let { wrap(it, 480f, 640f, 1560f, 32f, Color.rgb(255, 180, 90)) }
@@ -283,7 +283,7 @@ class SettingsContent(
     private fun boundary() {
         text(tr("Граница"), 480f, 100f, 52f, Color.WHITE, bold = true)
         wrap(
-            "Обойдите свободное место по краю — PhoneXR запомнит границу. Если подойдёте к ней, " +
+            "Обойдите свободное место по краю — LostXR запомнит границу. Если подойдёте к ней, " +
                 "появится стена, а если выйдете — предупреждение. Начинайте с того же места, где запускаете VR.",
             480f, 170f, 1560f, 34f
         )
