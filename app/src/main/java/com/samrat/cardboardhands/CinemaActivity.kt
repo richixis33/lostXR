@@ -114,7 +114,7 @@ class CinemaActivity : Activity(), LifecycleOwner {
             },
         )
         // Minecraft VR: head turns the game's camera, gestures play (see CinemaHands.minecraft).
-        val minecraft = intent.getStringExtra(EXTRA_PACKAGE) == "com.mojang.minecraftpe"
+        val minecraft = false
         hands?.minecraft = minecraft
         renderer.fullscreen = minecraft
         hands?.screenWidth = renderer.screenW
@@ -124,7 +124,7 @@ class CinemaActivity : Activity(), LifecycleOwner {
         // MinecraftBridge.start()
             hands?.onConnectGesture = { typeConnect() }
         }
-        if (false) {
+        if (minecraft) thread(name = "LostXR Minecraft look") {
             val head = FloatArray(16)
             var lastYaw = Float.NaN
             var lastPitch = 0f

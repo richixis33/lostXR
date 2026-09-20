@@ -253,14 +253,14 @@ class HandTrackingService : LifecycleService() {
         var rightJoy = joyCons?.pose(false) ?: JoyConTracker.Pose()
         var left = stableLeft.snapshot(leftJoy.connected)
         var right = stableRight.snapshot(rightJoy.connected)
-        val mode = TrackingSettings.getHandRenderMode(this)
-        if (mode == TrackingSettings.HANDS_DISABLED) {
-            left = left.copy(visible = false)
-            right = right.copy(visible = false)
-        } else if (mode == TrackingSettings.HANDS_RIGHT_ONLY) {
-            left = left.copy(visible = false)
-        } else if (mode == TrackingSettings.HANDS_LEFT_ONLY) {
-            right = right.copy(visible = false)
+        val renderMode = TrackingSettings.getHandRenderMode(this)
+        if (renderMode == TrackingSettings.HANDS_DISABLED) {
+            left = left.copy(present = false)
+            right = right.copy(present = false)
+        } else if (renderMode == TrackingSettings.HANDS_RIGHT_ONLY) {
+            left = left.copy(present = false)
+        } else if (renderMode == TrackingSettings.HANDS_LEFT_ONLY) {
+            right = right.copy(present = false)
         }
         if (current.markerJoyCons) {
             left = markerHand(0, leftJoy.connected)
@@ -360,31 +360,41 @@ class HandTrackingService : LifecycleService() {
 
     /** Removes landmark jitter and keeps a detected click alive long enough for games to read it. */
     private class StableHand(
-    private val defaultX: Float,
-    private val getParams: () -> Pair<Float, Float> = { 1.0f to 0.007f }
-) {
-    private val filter = OneEuroFilter3D()
-    private var last = HandState(false, x = defaultX, y = .5f, z = .5f)
-    private var unseen = 0
+        private val defaultX: Float,
+        private val getParams: () -> Pair<Float, Float> = { 1.0f to 0.007f }
+    ) {
+        private val euroFilter = OneEuroFilter3D()
+        private var last = HandState(present = false, x = defaultX, y = .5f, z = .5f)
+        private var unseen = 0
 
-    fun update(detected: HandState) {
-        val (minCutoff, beta) = getParams()
-        filter.updateParams(minCutoff.toDouble(), beta.toDouble())
+        fun update(detected: HandState) {
+            val (minCutoff, beta) = getParams()
+            euroFilter.updateParams(minCutoff.toDouble(), beta.toDouble())
 
-        if (detected.visible) {
-            unseen = 0
-            val (sx, sy, sz) = filter.filter(detected.x, detected.y, detected.z)
-            last = detected.copy(x = sx, y = sy, z = sz)
-        } else {
-            unseen++
-            // Если рука пропала из кадра больше чем на 4 кадра — сбрасываем фильтр,
-            // чтобы при следующем появлении не было эффекта "тянущейся" через экран руки
-            if (unseen > 4) {
-                filter.reset()
-                last = last.copy(visible = false)
+            if (detected.present) {
+                unseen = 0
+                val (sx, sy, sz) = euroFilter.filter(detected.x, detected.y, detected.z)
+                last = detected.copy(x = sx, y = sy, z = sz)
+            } else {
+                unseen++
+                if (unseen > 4) {
+                    euroFilter.reset()
+                    last = last.copy(present = false)
+                }
             }
         }
+
+        fun snapshot(connected: Boolean): HandState = last.copy(present = last.present || connected)
     }
 
-    fun snapshot(connected: Boolean): HandState = last.copy(visible = last.visible || connected)
+    private val Boolean.i get() = if (this) 1 else 0
+
+    companion object {
+        private const val CHANNEL = "phonexr_hands"
+        private const val NOTIFICATION_ID = 42
+        private const val RUNTIME_PORT = 42424
+        private const val SDK_PORT = 42425
+        /** A Joy-Con not seen for this long no longer counts as tracked. */
+        private const val LOST_MS = 400L
+    }
 }
